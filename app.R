@@ -4,6 +4,8 @@ library(zip)
 library(DBI)
 library(dplyr)
 library(ggplot2)
+library(shinycssloaders)
+library(shinyjs)
 
 # Define constants
 zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
@@ -13,11 +15,20 @@ temp_dir <- "Data/Test"
 
 # Define UI
 ui <- fluidPage(
+  useShinyjs(),  # Initialize shinyjs
+  div(
+    id = "loading-overlay",
+    style = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
+           background-color: rgba(255, 255, 255, 0.8); z-index: 1000; 
+           display: none; align-items: center; justify-content: center;",
+    h3(id = "loading-message", "Loading data, please wait...", style = "color: #555;")
+  ),
   titlePanel("Water Quality Data Viewer"),
   mainPanel(
-    plotOutput("plot")
+    withSpinner(plotOutput("plot"))  # Spinner while plot is rendering
   )
 )
+
 
 # Define server logic
 server <- function(input, output, session) {
@@ -25,6 +36,10 @@ server <- function(input, output, session) {
   # Reactive function to fetch and clean data
   fetch_and_clean_data <- reactive({
    
+    # Show loading overlay
+    runjs('document.getElementById("loading-overlay").style.display = "flex";')
+    runjs('document.getElementById("loading-message").textContent = "Downloading data...";')
+    
     # Attempt to download and unzip the file
     zip_path <- file.path(temp_dir, "data.zip")
     download_success <- FALSE
@@ -37,6 +52,9 @@ server <- function(input, output, session) {
       download.file(zip_url, zip_path, mode = "wb")
       download_success <- TRUE
       
+      # Update the loading message to indicate unzipping
+      runjs('document.getElementById("loading-message").textContent = "Extracting data...";')
+      
       # Unzip the file
       unzip(zip_path, exdir = temp_dir)
       access_file <- list.files(temp_dir, pattern = "\\.mdb$", full.names = TRUE)[1]
@@ -44,6 +62,9 @@ server <- function(input, output, session) {
       # Check if the database file exists
       if (length(access_file) > 0) {
         unzip_success <- TRUE
+        
+        # Update the loading message to indicate data cleaning
+        runjs('document.getElementById("loading-message").textContent = "Cleaning data...";')
       
       # Connect to the Access database
       con <- dbConnect(odbc::odbc(), .connection_string = paste(
@@ -73,7 +94,10 @@ server <- function(input, output, session) {
     })
     # If either download or unzip failed, load fallback data
     if (!download_success || !unzip_success || is.null(clean_data)) {
-      cleaned_agfc_lakes <- read.csv(fallback_data_path)
+      # Update the loading message to indicate fallback
+      runjs('document.getElementById("loading-message").textContent = "Using fallback data...";')
+      
+       cleaned_agfc_lakes <- read.csv(fallback_data_path)
       
       cleaned_agfc_lakes <- cleaned_agfc_lakes %>% 
         filter(SamplingPoint == "LOUA024A") %>% 
@@ -81,6 +105,9 @@ server <- function(input, output, session) {
       
       cleaned_agfc_lakes
     }
+    
+    # Hide loading overlay
+    runjs('document.getElementById("loading-overlay").style.display = "none";')
     
     clean_data
   })
