@@ -29,7 +29,10 @@ ui <- fluidPage(
       selectInput("parameter", "Select Parameter", choices = NULL)  # Dropdown for parameter selection
     ),
   mainPanel(
-    withSpinner(plotOutput("plot"))  # Spinner while plot is rendering
+    div(
+      style = "width: 60%; margin-lef: 0;",
+    withSpinner(plotOutput("plot", height = "400px"))  # Spinner while plot is rendering
+  )
   )
 )
 )
@@ -136,23 +139,59 @@ server <- function(input, output, session) {
         "Uid=Admin;Pwd=;", sep = ""
       ))
       
-      query <- paste("SELECT SamplingPoint, DateSampled, FinalResult
+      query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers
                       FROM WebLIMSResults
                       WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
       raw_data <- dbGetQuery(con, query)
       
+      # Data cleaning here:
       clean_data <- raw_data %>%
-        mutate(DateSampled = as.Date(DateSampled),
-               FinalResult = as.numeric(FinalResult))
+        mutate(DateSampled = as.Date(DateSampled))
+      # Handle detection limits:
+      # Data below DL (<) become half the value with "BDL"
+      # Data greater than DL (>) retain value with qualifier "ADL"
+      clean_data <- clean_data %>%
+        mutate(
+          DL = case_when(
+            grepl("^>", FinalResult) ~ ">DL",
+            grepl("^<", FinalResult) ~ "<DL",
+            TRUE ~ "Measured value"
+          ),
+          FinalResult = case_when(
+            grepl("^>", FinalResult) ~ as.numeric(sub(">", "", FinalResult)),
+            grepl("^<", FinalResult) ~ as.numeric(sub("<", "", FinalResult)) /
+              2,
+            TRUE ~ as.numeric(FinalResult)
+          ),
+          Qualifiers = case_when(
+            Qualifiers == "" ~ "None",
+            TRUE ~ Qualifiers
+          )
+        )
+      
+      clean_data <- clean_data %>% 
+        mutate(across(c(Qualifiers, DL), as.factor))
+      
       
       dbDisconnect(con)
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after plot data is ready
     
+    # Plotting:
     ggplot(clean_data, aes(x = DateSampled, y = FinalResult)) +
-      geom_point() +
-      ggtitle(paste(input$site, "-", input$parameter))
+      geom_point(aes(color = Qualifiers, shape = DL),
+                 alpha = 0.7,
+                 size = 2.5) +
+      theme_classic(base_size = 14) +
+      ggtitle(paste(input$site, "-", input$parameter)) +
+      labs(
+        #title = paste(filtered_data$Samplingpoint[1], param_group),
+        x = "Date",
+        y = "Result",
+        color = "Qualifiers",
+        shape = "Values"
+      )
   })
 }
 
