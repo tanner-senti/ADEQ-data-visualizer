@@ -25,7 +25,8 @@ ui <- fluidPage(
   titlePanel("Water Quality Data Viewer"),
   sidebarLayout(
     sidebarPanel(
-      selectInput("site", "Select Site", choices = NULL)  # Dropdown for site selection
+      selectInput("site", "Select Site", choices = NULL),  # Dropdown for site selection
+      selectInput("parameter", "Select Parameter", choices = NULL)  # Dropdown for parameter selection
     ),
   mainPanel(
     withSpinner(plotOutput("plot"))  # Spinner while plot is rendering
@@ -98,9 +99,30 @@ server <- function(input, output, session) {
     updateSelectInput(session, "site", choices = site_names)
   })
   
-  # Step 4: Wait for site selection, then query data for selected site and plot
+  # Step 4: Dynamically update parameter options based on site selection
+  observeEvent(input$site, {
+    req(input$site)  # Ensure the site is selected
+    
+    # Fetch parameters for the selected site
+    access_file <- fetch_and_unzip_data()
+    if (is.character(access_file)) {
+      con <- dbConnect(odbc::odbc(), .connection_string = paste(
+        "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
+        "Dbq=", access_file, ";",
+        "Uid=Admin;Pwd=;", sep = ""
+      ))
+      
+      query <- paste("SELECT DISTINCT WebParameter FROM WebLIMSResults WHERE SamplingPoint = '", input$site, "'", sep = "")
+      parameters <- dbGetQuery(con, query)
+      dbDisconnect(con)
+      
+      updateSelectInput(session, "parameter", choices = parameters$WebParameter)
+    }
+  })
+  
+  # Step 5: Query data for the selected site and parameter, then plot
   output$plot <- renderPlot({
-    req(input$site)  # Wait for a site selection
+    req(input$site, input$parameter)  # Ensure both site and parameter are selected
     
     runjs('document.getElementById("loading-message").textContent = "Querying data...";')
     
@@ -116,7 +138,7 @@ server <- function(input, output, session) {
       
       query <- paste("SELECT SamplingPoint, DateSampled, FinalResult
                       FROM WebLIMSResults
-                      WHERE SamplingPoint = '", input$site, "'", sep = "")
+                      WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
       raw_data <- dbGetQuery(con, query)
       
       clean_data <- raw_data %>%
@@ -130,7 +152,7 @@ server <- function(input, output, session) {
     
     ggplot(clean_data, aes(x = DateSampled, y = FinalResult)) +
       geom_point() +
-      ggtitle(input$site)
+      ggtitle(paste(input$site, "-", input$parameter))
   })
 }
 
