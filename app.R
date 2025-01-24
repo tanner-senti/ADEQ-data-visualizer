@@ -10,8 +10,8 @@ library(shinyjs)
 # Define constants
 zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
 fallback_data_path <- "Data/cleaned_agfc_lakes.csv"
-#temp_dir <- tempdir()
-temp_dir <- "Data/Test"
+temp_dir <- tempdir()
+#temp_dir <- "Data/Test"
 
 # Define UI
 ui <- fluidPage(
@@ -38,7 +38,7 @@ server <- function(input, output, session) {
    
     # Show loading overlay
     runjs('document.getElementById("loading-overlay").style.display = "flex";')
-    runjs('document.getElementById("loading-message").textContent = "Downloading data...";')
+    runjs('document.getElementById("loading-message").textContent = "Downloading data, please wait...";')
     
     # Attempt to download and unzip the file
     zip_path <- file.path(temp_dir, "data.zip")
@@ -73,12 +73,15 @@ server <- function(input, output, session) {
         "Uid=Admin;Pwd=;", sep = ""
       ))
       
-      # Read and clean data
-      raw_data <- dbReadTable(con, "WebLIMSResults")  # Replace with actual table name
+      # Read only relevant data and do minimal cleaning:
+      query <- "SELECT SamplingPoint, DateSampled, FinalResult
+                FROM WebLIMSResults
+                WHERE SamplingPoint = 'LOUA015A'
+                AND WebParameter = 'Depth, Secchi disk depth (m)'"
+      
+      raw_data <- dbGetQuery(con, query)
     
         clean_data <- raw_data %>%
-        filter(SamplingPoint == "LOUA015A") %>% 
-        filter(WebParameter == "Depth, Secchi disk depth (m)") %>% 
         mutate(DateSampled = as.Date(DateSampled),
                FinalResult = as.numeric(FinalResult))
       
@@ -115,7 +118,7 @@ server <- function(input, output, session) {
   # Use the cleaned data for plotting or analysis
   output$plot <- renderPlot({
     data <- fetch_and_clean_data()
-    ggplot(data, aes(x = DateSampled, y = FinalResult)) +  # Replace with actual columns
+    ggplot(data, aes(x = DateSampled, y = FinalResult)) +
       geom_point() +
       ggtitle(data$SamplingPoint[1])
   })
