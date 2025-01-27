@@ -37,11 +37,10 @@ ui <- fluidPage(
   )
 )
 
-
 # Define server logic
 server <- function(input, output, session) {
   
-  # Step 1: Fetch and unzip data
+  # Step 1: Fetch and unzip data - also check for linux system
   fetch_and_unzip_data <- reactive({
     runjs('document.getElementById("loading-overlay").style.display = "flex";')
     runjs('document.getElementById("loading-message").textContent = "Downloading data, please wait...";')
@@ -49,28 +48,34 @@ server <- function(input, output, session) {
     zip_path <- file.path(temp_dir, "data.zip")
     download_success <- FALSE
     unzip_success <- FALSE
+    access_file <- NULL
     
-    tryCatch({
-      # Download the zip file
-      download.file(zip_url, zip_path, mode = "wb")
-      download_success <- TRUE
-      
-      # Extract zip
-      runjs('document.getElementById("loading-message").textContent = "Extracting data...";')
-      unzip(zip_path, exdir = temp_dir)
-      access_file <- list.files(temp_dir, pattern = "\\.mdb$", full.names = TRUE)[1]
-      
-      if (length(access_file) > 0) {
-        unzip_success <- TRUE
-      }
-    }, error = function(e) {
-      message("Error fetching or unzipping data.")
-    })
+    # Check for operating system (avoid Access on Linux)
+    is_linux <- Sys.info()[["sysname"]] == "Linux"
     
-    if (!download_success || !unzip_success) {
+    if (!is_linux) {
+      tryCatch({
+        # Download the zip file
+        download.file(zip_url, zip_path, mode = "wb")
+        download_success <- TRUE
+        
+        # Extract zip
+        runjs('document.getElementById("loading-message").textContent = "Extracting data...";')
+        unzip(zip_path, exdir = temp_dir)
+        access_file <- list.files(temp_dir, pattern = "\\.mdb$", full.names = TRUE)[1]
+        
+        if (length(access_file) > 0) {
+          unzip_success <- TRUE
+        }
+      }, error = function(e) {
+        message("Error fetching or unzipping data.")
+      })
+    }
+    
+    if (is_linux || !download_success || !unzip_success) {
       runjs('document.getElementById("loading-message").textContent = "Using fallback data...";')
-      conn <- dbConnect(RSQLite::SQLite(), fallback_data_path)
-      # backup database stuff here
+      # Use fallback SQLite database on Linux or if the Access database is not available
+      access_file <- fallback_data_path
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
@@ -80,13 +85,21 @@ server <- function(input, output, session) {
   # Step 2: Pull a list of sites from SamplingPoint
   get_sites_from_db <- reactive({
     access_file <- fetch_and_unzip_data()
-    if (is.character(access_file)) {
+    con <- NULL
+    
+    if (endsWith(access_file, ".mdb")) {
+      # Connect to Access database
       con <- dbConnect(odbc::odbc(), .connection_string = paste(
         "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
         "Dbq=", access_file, ";",
         "Uid=Admin;Pwd=;", sep = ""
       ))
-      
+    } else {
+      # Connect to SQLite database (fallback)
+      con <- dbConnect(RSQLite::SQLite(), access_file)
+    }
+    
+    if (!is.null(con)) {
       query <- "SELECT DISTINCT SamplingPoint FROM WebLIMSResults"
       site_names <- dbGetQuery(con, query)
       dbDisconnect(con)
@@ -108,13 +121,21 @@ server <- function(input, output, session) {
     
     # Fetch parameters for the selected site
     access_file <- fetch_and_unzip_data()
-    if (is.character(access_file)) {
+    con <- NULL
+    
+    if (endsWith(access_file, ".mdb")) {
+      # Connect to Access database
       con <- dbConnect(odbc::odbc(), .connection_string = paste(
         "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
         "Dbq=", access_file, ";",
         "Uid=Admin;Pwd=;", sep = ""
       ))
-      
+    } else {
+      # Connect to SQLite database (fallback)
+      con <- dbConnect(RSQLite::SQLite(), access_file)
+    }
+    
+    if (!is.null(con)) {
       query <- paste("SELECT DISTINCT WebParameter FROM WebLIMSResults WHERE SamplingPoint = '", input$site, "'", sep = "")
       parameters <- dbGetQuery(con, query)
       dbDisconnect(con)
@@ -131,14 +152,21 @@ server <- function(input, output, session) {
     
     access_file <- fetch_and_unzip_data()
     clean_data <- NULL
+    con <- NULL
     
-    if (is.character(access_file)) {
+    if (endsWith(access_file, ".mdb")) {
+      # Connect to Access database
       con <- dbConnect(odbc::odbc(), .connection_string = paste(
         "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
         "Dbq=", access_file, ";",
         "Uid=Admin;Pwd=;", sep = ""
       ))
-      
+    } else {
+      # Connect to SQLite database (fallback)
+      con <- dbConnect(RSQLite::SQLite(), access_file)
+    }
+    
+    if (!is.null(con)) {
       query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers
                       FROM WebLIMSResults
                       WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
@@ -187,7 +215,6 @@ server <- function(input, output, session) {
       theme_classic(base_size = 14) +
       ggtitle(paste(input$site, "-", input$parameter)) +
       labs(
-        #title = paste(filtered_data$Samplingpoint[1], param_group),
         x = "Date",
         y = "Result",
         color = "Qualifiers",
@@ -195,7 +222,6 @@ server <- function(input, output, session) {
       )
   })
 }
-
 
 # Run the app
 shinyApp(ui = ui, server = server)
