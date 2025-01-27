@@ -4,8 +4,10 @@ library(odbc)
 library(fs) # For working with file sizes
 library(dplyr)
 
+
+# Creating a SQLite database from the Access database:
 # Specify the path for your SQLite database file
-sqlite_file <- "Data/WebLIMS_sql.sqlite"
+sqlite_file <- "Data/WebLIMS_sql2.sqlite"
 
 # Create an empty SQLite database
 sqlite_con <- dbConnect(SQLite(), sqlite_file)
@@ -13,11 +15,9 @@ sqlite_con <- dbConnect(SQLite(), sqlite_file)
 # Close the connection
 dbDisconnect(sqlite_con)
 
-
-
 # Set paths for your databases
-access_file <- "Data/WQARWebLIMS_web.mdb"
-sqlite_file <- "Data/WebLIMS_sql.sqlite"
+access_file <- "Data/WQARWebLIMS_web_normal.mdb"
+sqlite_file <- "Data/WebLIMS_sql2.sqlite"
 
 # Connect to the Access database
 access_con <- dbConnect(odbc::odbc(),
@@ -29,7 +29,7 @@ access_con <- dbConnect(odbc::odbc(),
 sqlite_con <- dbConnect(SQLite(), sqlite_file)
 
 # List all tables in the Access database
-tables <- c("WebLIMSResults", "WebLIMSStations")
+tables <- c("WebLIMSResults", "WebLIMSStations", "TempUpdated")
 
 # Loop through each table and copy it to SQLite
 for (table in tables) {
@@ -96,4 +96,34 @@ ggplot(clean_data, aes(x = DateSampled, y = FinalResult)) +  # Replace with actu
 dbDisconnect(con)
 
 clean_data
+
+# Reducing SQLite database size for Github upload ----
+# Load the RSQLite library
+library(RSQLite)
+
+# Connect to the SQLite database
+conn <- dbConnect(RSQLite::SQLite(), "Data/WebLIMS_sql2.sqlite")
+
+# Convert the numeric date column to a date format using the DATE() function
+query <- "
+  UPDATE WebLIMSResults
+  SET DateSampled = DATE(datetime(DateSampled, 'unixepoch'))
+"
+
+# Execute the query to convert the column
+dbExecute(conn, query)
+
+# Write the SQL query to select records with a date of 2010 or newer
+query <- "DELETE FROM WebLIMSResults WHERE DateSampled < '2016-01-01'"
+
+# Execute the query to delete the rows
+dbExecute(conn, query)
+
+dbExecute(conn, "VACUUM")
+
+testing <- dbReadTable(conn, "WebLIMSResults")
+
+# Close the database connection
+dbDisconnect(conn)
+
 
