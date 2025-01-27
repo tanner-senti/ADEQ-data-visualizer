@@ -26,7 +26,8 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       selectInput("site", "Select Site", choices = NULL),  # Dropdown for site selection
-      selectInput("parameter", "Select Parameter", choices = NULL)  # Dropdown for parameter selection
+      selectInput("parameter", "Select Parameter", choices = NULL),  # Dropdown for parameter selection
+      textOutput("db_message")  # Message about which database is being used
     ),
     mainPanel(
       div(
@@ -49,8 +50,8 @@ server <- function(input, output, session) {
     download_success <- FALSE
     unzip_success <- FALSE
     access_file <- NULL
+    db_message <- NULL
     
-    # Check for operating system (avoid Access on Linux)
     is_linux <- Sys.info()[["sysname"]] == "Linux"
     
     if (!is_linux) {
@@ -74,11 +75,30 @@ server <- function(input, output, session) {
     
     if (is_linux || !download_success || !unzip_success) {
       runjs('document.getElementById("loading-message").textContent = "Using fallback data...";')
-      # Use fallback SQLite database on Linux or if the Access database is not available
+      # Use SQLite if no Access database is available
       access_file <- fallback_data_path
+      # Fetch the date range from SQLite
+      conn_sqlite <- dbConnect(RSQLite::SQLite(), access_file)
+      date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
+      dbDisconnect(conn_sqlite)
+      
+      db_message <- paste("Using backup database - data available between ", date_range$min_date, " and ", date_range$max_date)
+    } else {
+      # Fetch the TempUpdated date from Access database
+      conn_access <- dbConnect(odbc::odbc(), .connection_string = paste(
+        "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
+        "Dbq=", access_file, ";",
+        "Uid=Admin;Pwd=;", sep = ""
+      ))
+      temp_updated_date <- dbGetQuery(conn_access, "SELECT Updated FROM TempUpdated")
+      dbDisconnect(conn_access)
+      
+      db_message <- paste("Using most recent version of the database uploaded on ", temp_updated_date$Updated)
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
+    output$db_message <- renderText({ db_message })
+    
     access_file
   })
   
