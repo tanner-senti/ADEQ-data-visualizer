@@ -7,6 +7,12 @@ library(ggplot2)
 library(shinycssloaders)
 library(shinyjs)
 
+# This app will work locally on a windows machine, or hosted on a microsoft server
+# with windows. 
+
+# If hosted on shinyapps (linux), will default to backup sqlite database (cannot pull and
+ # work with access databases)
+
 # Define constants
 zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
 fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
