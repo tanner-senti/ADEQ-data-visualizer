@@ -127,3 +127,14 @@ testing <- dbReadTable(conn, "WebLIMSResults")
 dbDisconnect(conn)
 
 
+# Fetching date updated ----
+conn_access <- dbConnect(odbc::odbc(), .connection_string = paste(
+  "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
+  "Dbq=", "Data/WQARWebLIMS_web_normal.mdb", ";",
+  "Uid=Admin;Pwd=;", sep = ""
+))
+temp_updated_date <- dbGetQuery(conn_access, "SELECT Updated FROM TempUpdated")
+dbDisconnect(conn_access)
+
+db_message <- paste("Using most recent version of the database uploaded on ", temp_updated_date$Updated)
+print(db_message)
