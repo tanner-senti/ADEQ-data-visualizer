@@ -9,7 +9,7 @@ library(shinyjs)
 
 # Define constants
 zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
-fallback_data_path <- "Data/cleaned_agfc_lakes.csv" # Update this with better database
+fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
 temp_dir <- tempdir()
 
 # Define UI
@@ -28,13 +28,13 @@ ui <- fluidPage(
       selectInput("site", "Select Site", choices = NULL),  # Dropdown for site selection
       selectInput("parameter", "Select Parameter", choices = NULL)  # Dropdown for parameter selection
     ),
-  mainPanel(
-    div(
-      style = "width: 60%; margin-lef: 0;",
-    withSpinner(plotOutput("plot", height = "400px"))  # Spinner while plot is rendering
+    mainPanel(
+      div(
+        style = "width: 60%; margin-lef: 0;",
+        withSpinner(plotOutput("plot", height = "400px"))  # Spinner while plot is rendering
+      )
+    )
   )
-  )
-)
 )
 
 
@@ -69,8 +69,8 @@ server <- function(input, output, session) {
     
     if (!download_success || !unzip_success) {
       runjs('document.getElementById("loading-message").textContent = "Using fallback data...";')
-      cleaned_agfc_lakes <- read.csv(fallback_data_path)
-      return(cleaned_agfc_lakes)
+      conn <- dbConnect(RSQLite::SQLite(), fallback_data_path)
+      # backup database stuff here
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
@@ -142,6 +142,7 @@ server <- function(input, output, session) {
       query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers
                       FROM WebLIMSResults
                       WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
+      
       raw_data <- dbGetQuery(con, query)
       
       # Data cleaning here:

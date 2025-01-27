@@ -1,0 +1,12 @@
+name: ADEQ-data-visualizer
+title: ADEQ-data-visualizer
+username: i24os8-tanner-senti
+account: i24os8-tanner-senti
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13820656
+bundleId: 9707559
+url: https://i24os8-tanner-senti.shinyapps.io/ADEQ-data-visualizer/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
