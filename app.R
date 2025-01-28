@@ -18,6 +18,9 @@ zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalService
 fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
 temp_dir <- tempdir()
 
+# FOr Posit Cloud Connect:
+#rsconnect::writeManifest()
+
 # Define UI
 ui <- fluidPage(
   useShinyjs(), #Shinyjs for data loading panels
