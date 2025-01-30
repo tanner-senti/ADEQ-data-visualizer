@@ -190,12 +190,11 @@ server <- function(input, output, session) {
     }
   })
   
-  # Step 5: Query data for the selected site and parameter, then plot
-  output$plot <- renderGirafe({
+  # Step 5: Query data for the selected site and parameter
+  get_data_for_plot_and_table <- reactive({
     req(input$site, input$parameter)  # Ensure both site and parameter are selected
     
-    runjs('document.getElementById("loading-message").textContent = "Querying data...";')
-    
+    # Use the fetch_and_unzip_data function to get the file path
     access_file <- fetch_and_unzip_data()
     clean_data <- NULL
     con <- NULL
@@ -214,102 +213,14 @@ server <- function(input, output, session) {
     
     if (!is.null(con)) {
       query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
-                    FROM WebLIMSResults
-                    WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
+                  FROM WebLIMSResults
+                  WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
       
       raw_data <- dbGetQuery(con, query)
-      
       
       # Data cleaning here:
       clean_data <- raw_data %>%
-        mutate(DateSampled = as.Date(DateSampled))
-      # Handle detection limits:
-      # Data below DL (<) become half the value with "BDL"
-      # Data greater than DL (>) retain value with qualifier "ADL"
-      clean_data <- clean_data %>%
-        mutate(
-          DL = case_when(
-            grepl("^>", FinalResult) ~ ">DL",
-            grepl("^<", FinalResult) ~ "<DL",
-            TRUE ~ "Measured value"
-          ),
-          FinalResult = case_when(
-            grepl("^>", FinalResult) ~ as.numeric(sub(">", "", FinalResult)),
-            grepl("^<", FinalResult) ~ as.numeric(sub("<", "", FinalResult)) /
-              2,
-            TRUE ~ as.numeric(FinalResult)
-          ),
-          Qualifiers = case_when(
-            Qualifiers == "" ~ "None",
-            TRUE ~ Qualifiers
-          )
-        )
-      
-      clean_data <- clean_data %>% 
-        mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
-      
-      
-      dbDisconnect(con)
-    }
-    
-    runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after plot data is ready
-    
-    
-    # Create your interactive plot
-    p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
-                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), "<br>Result:", FinalResult))) +
-      geom_point_interactive(aes(color = Qualifiers, shape = DL),
-                             alpha = 0.7,
-                             size = 2.5) +
-      scale_shape_manual(values = c("Measured value" = 16, "<DL" = 17, ">DL" = 17)) + # 16 = filled circle, 17 = filled triangle
-      theme_classic(base_size = 14) +
-      ggtitle(paste(input$site, "-", input$parameter)) +
-      labs(
-        x = "Date",
-        y = "Result",
-        color = "Qualifiers",
-        shape = "Values"
-      )
-    
-    # Display interactive plot
-    girafe(ggobj = p)
-    
-  })
-  
-  # Step 6: Update the data table to react to site and parameter selection
-  output$data_table <- DT::renderDT({
-    req(input$site, input$parameter)  # Ensure both site and parameter are selected
-    
-    # Query and process the data again based on the selected site and parameter
-    access_file <- fetch_and_unzip_data()
-    clean_data <- NULL
-    con <- NULL
-    
-    if (endsWith(access_file, ".mdb")) {
-      # Connect to Access database
-      con <- dbConnect(odbc::odbc(), .connection_string = paste(
-        "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
-        "Dbq=", access_file, ";",
-        "Uid=Admin;Pwd=;", sep = ""
-      ))
-    } else {
-      # Connect to SQLite database (fallback)
-      con <- dbConnect(RSQLite::SQLite(), access_file)
-    }
-    
-    if (!is.null(con)) {
-      query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
-                    FROM WebLIMSResults
-                    WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
-      
-      raw_data <- dbGetQuery(con, query)
-      
-      # Data cleaning
-      clean_data <- raw_data %>%
-        mutate(DateSampled = as.Date(DateSampled))
-      
-      # Handle detection limits
-      clean_data <- clean_data %>%
+        mutate(DateSampled = as.Date(DateSampled)) %>%
         mutate(
           DL = case_when(
             grepl("^>", FinalResult) ~ ">DL",
@@ -325,16 +236,44 @@ server <- function(input, output, session) {
             Qualifiers == "" ~ "None",
             TRUE ~ Qualifiers
           )
-        )
-      
-      clean_data <- clean_data %>% 
+        ) %>%
         mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
       
       dbDisconnect(con)
     }
     
-    # Render the updated data table
-    DT::datatable(clean_data[, c("SamplingPoint", "WebParameter", "DateSampled", "FinalResult", "DL", "Qualifiers")],
+    return(clean_data)
+  })
+  
+  # Step 6: Use the reactive data for both plot and table
+  
+  # Render plot using the reactive data
+  output$plot <- renderGirafe({
+    clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+    
+    p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
+                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), "<br>Result:", FinalResult))) +
+      geom_point_interactive(aes(color = Qualifiers, shape = DL),
+                             alpha = 0.7,
+                             size = 2.5) +
+      scale_shape_manual(values = c("Measured value" = 16, "<DL" = 17, ">DL" = 17)) + # 16 = filled circle, 17 = filled triangle
+      theme_classic(base_size = 14) +
+      ggtitle(paste(input$site, "-", input$parameter)) +
+      labs(
+        x = "Date",
+        y = "Result",
+        color = "Qualifiers",
+        shape = "Values"
+      )
+    
+    girafe(ggobj = p)
+  })
+  
+  # Render the data table using the same reactive data
+  output$data_table <- DT::renderDT({
+    clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+    
+    DT::datatable(clean_data[, c("SamplingPoint", "DateSampled", "WebParameter", "FinalResult", "DL", "Qualifiers")],
                   colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers"),
                   options = list(
                     pageLength = 20,
