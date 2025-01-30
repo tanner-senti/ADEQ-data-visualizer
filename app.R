@@ -34,8 +34,8 @@ ui <- fluidPage(
   titlePanel("Water Quality Data Viewer"),
   sidebarLayout(
     sidebarPanel(
-      selectInput("site", "Select Site", choices = NULL),  # Dropdown for site selection
-      selectInput("parameter", "Select Parameter", choices = NULL),  # Dropdown for parameter selection
+      selectizeInput("site", "Search or select a site:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000)),  
+      selectizeInput("parameter", "Search or select a parameter:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000)),  
       textOutput("db_message")  # Message about which database is being used
     ),
     mainPanel(
@@ -141,7 +141,7 @@ server <- function(input, output, session) {
   # Step 3: Populate dropdown with site options
   observe({
     site_names <- get_sites_from_db()
-    updateSelectInput(session, "site", choices = site_names)
+    updateSelectizeInput(session, "site", choices = site_names, server = TRUE)
   })
   
   # Step 4: Dynamically update parameter options based on site selection
@@ -169,7 +169,7 @@ server <- function(input, output, session) {
       parameters <- dbGetQuery(con, query)
       dbDisconnect(con)
       
-      updateSelectInput(session, "parameter", choices = parameters$WebParameter)
+      updateSelectizeInput(session, "parameter", choices = parameters$WebParameter, server = TRUE)
     }
   })
   
