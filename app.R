@@ -3,10 +3,12 @@ library(RSQLite)
 library(zip)
 library(DBI)
 library(dplyr)
+library(ggiraph)
 library(ggplot2)
 library(plotly)
 library(shinycssloaders)
 library(shinyjs)
+library(DT)
 
 # This app will work locally on a windows machine, or hosted on a microsoft server
 # with windows. 
@@ -24,7 +26,7 @@ temp_dir <- tempdir()
 
 # Define UI
 ui <- fluidPage(
-  useShinyjs(), #Shinyjs for data loading panels
+  useShinyjs(), # Shinyjs for data loading panels
   div(
     id = "loading-overlay",
     style = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
@@ -33,17 +35,31 @@ ui <- fluidPage(
     h3(id = "loading-message", "Loading data, please wait...", style = "color: #555;")
   ),
   titlePanel("Water Quality Data Viewer"),
-  sidebarLayout(
-    sidebarPanel(
-      selectizeInput("site", "Search or select a site:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000)),  
-      selectizeInput("parameter", "Search or select a parameter:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000)),  
-      textOutput("db_message")  # Message about which database is being used
+  
+  # Centering the content
+  div(
+    style = "display: flex; flex-direction: column; align-items: center; justify-content: center;",
+    
+    # Message about the database being used
+    textOutput("db_message"),
+    
+    # Input panel with site and parameter selection horizontally
+    div(
+      style = "display: flex; justify-content: center; gap: 10px;",
+      selectizeInput("site", "Search or select a site:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000)),
+      selectizeInput("parameter", "Search or select a parameter:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000))
     ),
-    mainPanel(
-      div(
-        style = "width: 80%; margin-lef: 0;",
-        withSpinner(girafeOutput("plot", height = "600px"))  # Spinner while plot is rendering
-      )
+    
+    # Plot panel
+    div(
+      style = "width: 80%; margin-left: 0;",
+      withSpinner(girafeOutput("plot", height = "600px"))  # Spinner while plot is rendering
+    ),
+    
+    # Placeholder for table (to be added later)
+    div(
+      style = "width: 80%; margin-top: 20px;",
+      DT::DTOutput("data_table")  # This will render the table
     )
   )
 )
@@ -197,11 +213,12 @@ server <- function(input, output, session) {
     }
     
     if (!is.null(con)) {
-      query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers
-                      FROM WebLIMSResults
-                      WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
+      query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
+                    FROM WebLIMSResults
+                    WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
       
       raw_data <- dbGetQuery(con, query)
+      
       
       # Data cleaning here:
       clean_data <- raw_data %>%
@@ -229,13 +246,14 @@ server <- function(input, output, session) {
         )
       
       clean_data <- clean_data %>% 
-        mutate(across(c(Qualifiers, DL), as.factor))
+        mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
       
       
       dbDisconnect(con)
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after plot data is ready
+    
     
     # Create your interactive plot
     p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
@@ -255,7 +273,77 @@ server <- function(input, output, session) {
     
     # Display interactive plot
     girafe(ggobj = p)
+    
   })
+  
+  # Step 6: Update the data table to react to site and parameter selection
+  output$data_table <- DT::renderDT({
+    req(input$site, input$parameter)  # Ensure both site and parameter are selected
+    
+    # Query and process the data again based on the selected site and parameter
+    access_file <- fetch_and_unzip_data()
+    clean_data <- NULL
+    con <- NULL
+    
+    if (endsWith(access_file, ".mdb")) {
+      # Connect to Access database
+      con <- dbConnect(odbc::odbc(), .connection_string = paste(
+        "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
+        "Dbq=", access_file, ";",
+        "Uid=Admin;Pwd=;", sep = ""
+      ))
+    } else {
+      # Connect to SQLite database (fallback)
+      con <- dbConnect(RSQLite::SQLite(), access_file)
+    }
+    
+    if (!is.null(con)) {
+      query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
+                    FROM WebLIMSResults
+                    WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
+      
+      raw_data <- dbGetQuery(con, query)
+      
+      # Data cleaning
+      clean_data <- raw_data %>%
+        mutate(DateSampled = as.Date(DateSampled))
+      
+      # Handle detection limits
+      clean_data <- clean_data %>%
+        mutate(
+          DL = case_when(
+            grepl("^>", FinalResult) ~ ">DL",
+            grepl("^<", FinalResult) ~ "<DL",
+            TRUE ~ "Measured value"
+          ),
+          FinalResult = case_when(
+            grepl("^>", FinalResult) ~ as.numeric(sub(">", "", FinalResult)),
+            grepl("^<", FinalResult) ~ as.numeric(sub("<", "", FinalResult)) / 2,
+            TRUE ~ as.numeric(FinalResult)
+          ),
+          Qualifiers = case_when(
+            Qualifiers == "" ~ "None",
+            TRUE ~ Qualifiers
+          )
+        )
+      
+      clean_data <- clean_data %>% 
+        mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
+      
+      dbDisconnect(con)
+    }
+    
+    # Render the updated data table
+    DT::datatable(clean_data[, c("SamplingPoint", "WebParameter", "DateSampled", "FinalResult", "DL", "Qualifiers")],
+                  colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers"),
+                  options = list(
+                    pageLength = 20,
+                    autoWidth = TRUE,
+                    dom = "Bfrtip",
+                    buttons = c("copy", "csv", "excel")
+                  ))
+  })
+  
 }
 
 # Run the app
