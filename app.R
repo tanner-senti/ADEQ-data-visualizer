@@ -4,6 +4,7 @@ library(zip)
 library(DBI)
 library(dplyr)
 library(ggplot2)
+library(plotly)
 library(shinycssloaders)
 library(shinyjs)
 
@@ -40,8 +41,8 @@ ui <- fluidPage(
     ),
     mainPanel(
       div(
-        style = "width: 60%; margin-lef: 0;",
-        withSpinner(plotOutput("plot", height = "400px"))  # Spinner while plot is rendering
+        style = "width: 80%; margin-lef: 0;",
+        withSpinner(girafeOutput("plot", height = "600px"))  # Spinner while plot is rendering
       )
     )
   )
@@ -102,7 +103,7 @@ server <- function(input, output, session) {
       temp_updated_date <- dbGetQuery(conn_access, "SELECT Updated FROM TempUpdated")
       dbDisconnect(conn_access)
       
-      db_message <- paste("Using most recent version of the database uploaded on ", temp_updated_date$Updated)
+      db_message <- paste("Using most recent version of the database uploaded on ", format(temp_updated_date$Updated, "%m-%d-%Y"))
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
@@ -174,7 +175,7 @@ server <- function(input, output, session) {
   })
   
   # Step 5: Query data for the selected site and parameter, then plot
-  output$plot <- renderPlot({
+  output$plot <- renderGirafe({
     req(input$site, input$parameter)  # Ensure both site and parameter are selected
     
     runjs('document.getElementById("loading-message").textContent = "Querying data...";')
@@ -236,11 +237,13 @@ server <- function(input, output, session) {
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after plot data is ready
     
-    # Plotting:
-    ggplot(clean_data, aes(x = DateSampled, y = FinalResult)) +
-      geom_point(aes(color = Qualifiers, shape = DL),
-                 alpha = 0.7,
-                 size = 2.5) +
+    # Create your interactive plot
+    p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
+                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), "<br>Result:", FinalResult))) +
+      geom_point_interactive(aes(color = Qualifiers, shape = DL),
+                             alpha = 0.7,
+                             size = 2.5) +
+      scale_shape_manual(values = c("Measured value" = 16, "<DL" = 17, ">DL" = 17)) + # 16 = filled circle, 17 = filled triangle
       theme_classic(base_size = 14) +
       ggtitle(paste(input$site, "-", input$parameter)) +
       labs(
@@ -249,6 +252,9 @@ server <- function(input, output, session) {
         color = "Qualifiers",
         shape = "Values"
       )
+    
+    # Display interactive plot
+    girafe(ggobj = p)
   })
 }
 
