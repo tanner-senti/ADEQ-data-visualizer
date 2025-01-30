@@ -34,14 +34,16 @@ ui <- fluidPage(
            display: none; align-items: center; justify-content: center;",
     h3(id = "loading-message", "Loading data, please wait...", style = "color: #555;")
   ),
-  titlePanel("Water Quality Data Viewer"),
   
   # Centering the content
   div(
     style = "display: flex; flex-direction: column; align-items: center; justify-content: center;",
     
+    titlePanel("Water Quality Data Viewer"),
+    
     # Message about the database being used
     textOutput("db_message"),
+    br(),
     
     # Input panel with site and parameter selection horizontally
     div(
@@ -273,14 +275,16 @@ server <- function(input, output, session) {
   output$data_table <- DT::renderDT({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
     
-    DT::datatable(clean_data[, c("SamplingPoint", "DateSampled", "WebParameter", "FinalResult", "DL", "Qualifiers")],
+    DT::datatable(clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers")],
                   colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers"),
                   options = list(
                     pageLength = 20,
                     autoWidth = TRUE,
-                    dom = "Bfrtip",
-                    buttons = c("copy", "csv", "excel")
-                  ))
+                    dom = "Bfrtip",  # This controls the placement of buttons like 'copy', 'csv', etc
+                    buttons = c("copy", "csv", "excel"),
+                    searching = FALSE  # Disable the search function
+                  ),
+                  rownames = FALSE)
   })
   
 }
