@@ -17,7 +17,7 @@ library(DT)
  # work with access databases)
 
 # Define constants
-zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
+zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_webf.zip"
 fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
 temp_dir <- tempdir()
 
@@ -108,6 +108,10 @@ server <- function(input, output, session) {
       # Fetch the date range from SQLite
       conn_sqlite <- dbConnect(RSQLite::SQLite(), access_file)
       date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
+      # FIX the leading/trailing spaces for SQLITE here:
+      # Run update queries to trim spaces
+      dbExecute(conn_sqlite, "UPDATE WebLIMSResults SET SamplingPoint = TRIM(SamplingPoint);")
+      dbExecute(conn_sqlite, "UPDATE WebLIMSStations SET StationID = TRIM(StationID);")
       dbDisconnect(conn_sqlite)
       
       db_message <- paste("Using backup database - data available between ", date_range$min_date, " and ", date_range$max_date)
@@ -119,6 +123,10 @@ server <- function(input, output, session) {
         "Uid=Admin;Pwd=;", sep = ""
       ))
       temp_updated_date <- dbGetQuery(conn_access, "SELECT Updated FROM TempUpdated")
+      # Removing leading/trailing spaces here!!!
+      # Run update queries to trim spaces
+      dbExecute(conn_access, "UPDATE WebLIMSResults SET SamplingPoint = Trim(SamplingPoint);")
+      dbExecute(conn_access, "UPDATE WebLIMSStations SET StationID = Trim(StationID);")
       dbDisconnect(conn_access)
       
       db_message <- paste("Using most recent version of the database uploaded on ", format(temp_updated_date$Updated, "%m-%d-%Y"))
@@ -214,9 +222,17 @@ server <- function(input, output, session) {
     }
     
     if (!is.null(con)) {
-      query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
-                  FROM WebLIMSResults
-                  WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
+      # query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
+      #             FROM WebLIMSResults
+      #             WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
+      query <- paste0(
+       "SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, ",
+       "RelativeDepthComments, WebParameter, WebLIMSStations.Description ",
+       "FROM WebLIMSResults ",
+       "LEFT JOIN WebLIMSStations ON WebLIMSResults.SamplingPoint = WebLIMSStations.StationID ",
+       "WHERE SamplingPoint = '", input$site, "' ",
+       "AND WebParameter = '", input$parameter, "'"
+       )
       
       raw_data <- dbGetQuery(con, query)
       
@@ -252,6 +268,8 @@ server <- function(input, output, session) {
   # Render plot using the reactive data
   output$plot <- renderGirafe({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+    
+    print(unique(clean_data$Description))
     
     p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
                                 tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), "<br>Result:", FinalResult))) +
