@@ -17,7 +17,7 @@ library(DT)
  # work with access databases)
 
 # Define constants
-zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_webf.zip"
+zip_url <- "https://www.DELETEadeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
 fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
 temp_dir <- tempdir()
 
@@ -62,9 +62,9 @@ ui <- fluidPage(
       withSpinner(girafeOutput("plot", height = "600px"))  # Spinner while plot is rendering
     ),
     
-    # Placeholder for table (to be added later)
+    # Table under the single plot:
     div(
-      style = "width: 80%; margin-top: 20px;",
+      style = "width: 85%; margin-top: 20px;",
       DT::DTOutput("data_table")  # This will render the table
     )
   )
@@ -272,7 +272,8 @@ server <- function(input, output, session) {
       clean_data <- raw_data %>%
         mutate(DateSampled = as.Date(DateSampled)) %>%
         mutate(
-          FinalResult = as.character(FinalResult),  # Ensure it's character before manipulatio
+          FinalResult = as.character(FinalResult),
+          # Ensure it's character before manipulation
           DL = case_when(
             grepl("^>", FinalResult) ~ ">DL",
             grepl("^<", FinalResult) ~ "<DL",
@@ -283,12 +284,16 @@ server <- function(input, output, session) {
             grepl("^<", FinalResult) ~ suppressWarnings(as.numeric(sub("<", "", FinalResult))) / 2,
             TRUE ~ suppressWarnings(as.numeric(trimws(FinalResult)))
           ),
-          Qualifiers = case_when(
-            Qualifiers == "" ~ "None",
-            TRUE ~ Qualifiers
-          )
+          Qualifiers = case_when(Qualifiers == "" ~ "None",
+                                 TRUE ~ Qualifiers),
+          RelativeDepthComments = trimws(RelativeDepthComments),  # Remove leading & trailing spaces
+          RelativeDepthComments = toupper(RelativeDepthComments),
+          RelativeDepthComments = na_if(RelativeDepthComments, "")
         ) %>%
         mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
+      
+      print(str(clean_data))
+      print(unique(clean_data$RelativeDepthComments))
       
       dbDisconnect(con)
     }
@@ -301,13 +306,21 @@ server <- function(input, output, session) {
   # Render plot using the reactive data
   output$plot <- renderGirafe({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+  
+    # Check if RelativeDepthComments has any non-NA values
+    use_size <- any(!is.na(clean_data$RelativeDepthComments))
     
+    # Base plot (no size or Relative Depth):
     p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
-                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), "<br>Result:", FinalResult))) +
+                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), 
+                                                "<br>Result:", FinalResult,
+                                                #"<br>Value:", DL, # weird display issue 
+                                                "<br>Qualifiers:", Qualifiers,
+                                                "<br>Relative Depth:", RelativeDepthComments))) +
       geom_point_interactive(aes(color = Qualifiers, shape = DL),
                              alpha = 0.7,
                              size = 2.5) +
-      scale_shape_manual(values = c("Measured value" = 16, "<DL" = 17, ">DL" = 17)) + # 16 = filled circle, 17 = filled triangle
+      scale_shape_manual(values = c("Measured value" = 16, "<DL" = 17, ">DL" = 17)) + # 16 = circle, 17 = triangle
       theme_classic(base_size = 14) +
       ggtitle(paste(input$site, "-", input$parameter)) +
       labs(
@@ -317,6 +330,17 @@ server <- function(input, output, session) {
         shape = "Values"
       )
     
+    # Add size mapping only if RelativeDepthComments is not all NA
+    if (use_size) {
+      p <- p + 
+        geom_point_interactive(aes(size = RelativeDepthComments, color = Qualifiers, shape = DL), alpha = 0.7) +
+        # scale_shape_manual(values = c("Measured value" = 16, "<DL" = 17, ">DL" = 17)) +
+        scale_size_manual(values = c("EPILIMNION" = 2.5, "HYPOLIMNION" = 5.5,
+                                     "THERMOCLINE" = 4, "MID-DEPTH" = 4),
+                          name = "Relative Depth",
+                          drop = TRUE)
+    }
+    
     girafe(ggobj = p)
   })
   
@@ -324,8 +348,8 @@ server <- function(input, output, session) {
   output$data_table <- DT::renderDT({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
     
-    DT::datatable(clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers")],
-                  colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers"),
+    DT::datatable(clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers", "RelativeDepthComments")],
+                  colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers", "Relative Depth"),
                   options = list(
                     pageLength = 20,
                     autoWidth = TRUE,
