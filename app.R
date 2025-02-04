@@ -64,7 +64,7 @@ ui <- fluidPage(
     
     # Table under the single plot:
     div(
-      style = "width: 85%; margin-top: 20px;",
+      style = "width: 85%; margin-top: 20px; max-width: 1000px",
       DT::DTOutput("data_table")  # This will render the table
     )
   )
@@ -292,9 +292,6 @@ server <- function(input, output, session) {
         ) %>%
         mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
       
-      print(str(clean_data))
-      print(unique(clean_data$RelativeDepthComments))
-      
       dbDisconnect(con)
     }
     
@@ -328,7 +325,8 @@ server <- function(input, output, session) {
         y = "Result",
         color = "Qualifiers",
         shape = "Values"
-      )
+      ) +
+      theme( axis.text.x = element_text(angle = 45, hjust =1))
     
     # Add size mapping only if RelativeDepthComments is not all NA
     if (use_size) {
@@ -355,7 +353,13 @@ server <- function(input, output, session) {
                     autoWidth = TRUE,
                     dom = "Bfrtip",  # This controls the placement of buttons like 'copy', 'csv', etc
                     buttons = c("copy", "csv", "excel"),
-                    searching = FALSE  # Disable the search function
+                    searching = FALSE,  # Disable the search function
+                    columnDefs = list(
+                      list(
+                        targets = 2,  # The "Date" column is at index 2 (third column)
+                        width = '250px'  # Adjust the width as needed (in pixels or percentages)
+                      )
+                    )
                   ),
                   rownames = FALSE)
   })
