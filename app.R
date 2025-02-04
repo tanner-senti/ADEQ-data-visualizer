@@ -21,8 +21,6 @@ zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalService
 fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
 temp_dir <- tempdir()
 
-# FOr Posit Cloud Connect:
-#rsconnect::writeManifest()
 
 # Define UI
 ui <- fluidPage(
@@ -48,8 +46,14 @@ ui <- fluidPage(
     # Input panel with site and parameter selection horizontally
     div(
       style = "display: flex; justify-content: center; gap: 10px;",
-      selectizeInput("site", "Search or select a site:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000)),
-      selectizeInput("parameter", "Search or select a parameter:", choices = NULL, multiple = FALSE, options = list(placeholder = "Search...", maxOptions = 1000))
+      selectizeInput("site", "Search by SiteID:", choices = NULL, multiple = FALSE, 
+                     options = list(placeholder = "Search...", maxOptions = 1000), 
+                     width = "200px"),
+      selectizeInput("description", "Search by description:", choices = NULL, multiple = FALSE, 
+                     options = list(placeholder = "Search...", maxOptions = 1000)),
+      selectizeInput("parameter", "Search or select a parameter:", choices = NULL, multiple = FALSE, 
+                     options = list(placeholder = "Search...", maxOptions = 1000), 
+                     width = "200px")
     ),
     
     # Plot panel
@@ -77,7 +81,7 @@ server <- function(input, output, session) {
     zip_path <- file.path(temp_dir, "data.zip")
     download_success <- FALSE
     unzip_success <- FALSE
-    access_file <- NULL
+    database_file <- NULL
     db_message <- NULL
     
     is_linux <- Sys.info()[["sysname"]] == "Linux"
@@ -91,9 +95,9 @@ server <- function(input, output, session) {
         # Extract zip
         runjs('document.getElementById("loading-message").textContent = "Extracting data...";')
         unzip(zip_path, exdir = temp_dir)
-        access_file <- list.files(temp_dir, pattern = "\\.mdb$", full.names = TRUE)[1]
+        database_file <- list.files(temp_dir, pattern = "\\.mdb$", full.names = TRUE)[1]
         
-        if (length(access_file) > 0) {
+        if (length(database_file) > 0) {
           unzip_success <- TRUE
         }
       }, error = function(e) {
@@ -104,9 +108,9 @@ server <- function(input, output, session) {
     if (is_linux || !download_success || !unzip_success) {
       runjs('document.getElementById("loading-message").textContent = "Using fallback data...";')
       # Use SQLite if no Access database is available
-      access_file <- fallback_data_path
+      database_file <- fallback_data_path
       # Fetch the date range from SQLite
-      conn_sqlite <- dbConnect(RSQLite::SQLite(), access_file)
+      conn_sqlite <- dbConnect(RSQLite::SQLite(), database_file)
       date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
       # FIX the leading/trailing spaces for SQLITE here:
       # Run update queries to trim spaces
@@ -119,7 +123,7 @@ server <- function(input, output, session) {
       # Fetch the TempUpdated date from Access database
       conn_access <- dbConnect(odbc::odbc(), .connection_string = paste(
         "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
-        "Dbq=", access_file, ";",
+        "Dbq=", database_file, ";",
         "Uid=Admin;Pwd=;", sep = ""
       ))
       temp_updated_date <- dbGetQuery(conn_access, "SELECT Updated FROM TempUpdated")
@@ -135,32 +139,34 @@ server <- function(input, output, session) {
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
     output$db_message <- renderText({ db_message })
     
-    access_file
+    database_file
   })
   
   # Step 2: Pull a list of sites from SamplingPoint
   get_sites_from_db <- reactive({
-    access_file <- fetch_and_unzip_data()
+    database_file <- fetch_and_unzip_data()
     con <- NULL
     
-    if (endsWith(access_file, ".mdb")) {
+    if (endsWith(database_file, ".mdb")) {
       # Connect to Access database
       con <- dbConnect(odbc::odbc(), .connection_string = paste(
         "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
-        "Dbq=", access_file, ";",
+        "Dbq=", database_file, ";",
         "Uid=Admin;Pwd=;", sep = ""
       ))
     } else {
       # Connect to SQLite database (fallback)
-      con <- dbConnect(RSQLite::SQLite(), access_file)
+      con <- dbConnect(RSQLite::SQLite(), database_file)
     }
     
     if (!is.null(con)) {
-      query <- "SELECT DISTINCT SamplingPoint FROM WebLIMSResults"
+      query <- "SELECT DISTINCT SamplingPoint, WebLIMSStations.Description
+                FROM WebLIMSResults
+                LEFT JOIN WebLIMSStations ON WebLIMSResults.SamplingPoint = WebLIMSStations.StationID"
       site_names <- dbGetQuery(con, query)
       dbDisconnect(con)
       
-      return(site_names$SamplingPoint)
+      return(site_names)
     }
     return(NULL)
   })
@@ -168,7 +174,33 @@ server <- function(input, output, session) {
   # Step 3: Populate dropdown with site options
   observe({
     site_names <- get_sites_from_db()
-    updateSelectizeInput(session, "site", choices = site_names, server = TRUE)
+    updateSelectizeInput(session, "site", choices = site_names$SamplingPoint, server = TRUE)
+    updateSelectizeInput(session, "description", choices = site_names$Description, server = TRUE)
+  })
+  
+  # Observe a description selection, update the site input:
+  observeEvent(input$description, {
+    req(input$description)
+    site_id <- get_sites_from_db() %>% 
+      filter(Description == input$description) %>% 
+      pull(SamplingPoint)
+    
+    if (length(site_id) > 0) {
+      updateSelectizeInput(session, "site", selected = site_id)
+    }
+  })
+  
+  # Fix the observeEvent for site selection to correctly update description
+  observeEvent(input$site, {
+    req(input$site)
+    
+    description <- get_sites_from_db() %>%
+      filter(SamplingPoint == input$site) %>%
+      pull(Description)
+    
+    if (length(description) > 0) {
+      updateSelectizeInput(session, "description", selected = description)
+    }
   })
   
   # Step 4: Dynamically update parameter options based on site selection
@@ -176,19 +208,19 @@ server <- function(input, output, session) {
     req(input$site)  # Ensure the site is selected
     
     # Fetch parameters for the selected site
-    access_file <- fetch_and_unzip_data()
+    database_file <- fetch_and_unzip_data()
     con <- NULL
     
-    if (endsWith(access_file, ".mdb")) {
+    if (endsWith(database_file, ".mdb")) {
       # Connect to Access database
       con <- dbConnect(odbc::odbc(), .connection_string = paste(
         "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
-        "Dbq=", access_file, ";",
+        "Dbq=", database_file, ";",
         "Uid=Admin;Pwd=;", sep = ""
       ))
     } else {
       # Connect to SQLite database (fallback)
-      con <- dbConnect(RSQLite::SQLite(), access_file)
+      con <- dbConnect(RSQLite::SQLite(), database_file)
     }
     
     if (!is.null(con)) {
@@ -205,20 +237,20 @@ server <- function(input, output, session) {
     req(input$site, input$parameter)  # Ensure both site and parameter are selected
     
     # Use the fetch_and_unzip_data function to get the file path
-    access_file <- fetch_and_unzip_data()
+    database_file <- fetch_and_unzip_data()
     clean_data <- NULL
     con <- NULL
     
-    if (endsWith(access_file, ".mdb")) {
+    if (endsWith(database_file, ".mdb")) {
       # Connect to Access database
       con <- dbConnect(odbc::odbc(), .connection_string = paste(
         "Driver={Microsoft Access Driver (*.mdb, *.accdb)};",
-        "Dbq=", access_file, ";",
+        "Dbq=", database_file, ";",
         "Uid=Admin;Pwd=;", sep = ""
       ))
     } else {
       # Connect to SQLite database (fallback)
-      con <- dbConnect(RSQLite::SQLite(), access_file)
+      con <- dbConnect(RSQLite::SQLite(), database_file)
     }
     
     if (!is.null(con)) {
@@ -240,15 +272,16 @@ server <- function(input, output, session) {
       clean_data <- raw_data %>%
         mutate(DateSampled = as.Date(DateSampled)) %>%
         mutate(
+          FinalResult = as.character(FinalResult),  # Ensure it's character before manipulatio
           DL = case_when(
             grepl("^>", FinalResult) ~ ">DL",
             grepl("^<", FinalResult) ~ "<DL",
             TRUE ~ "Measured value"
           ),
           FinalResult = case_when(
-            grepl("^>", FinalResult) ~ as.numeric(sub(">", "", FinalResult)),
-            grepl("^<", FinalResult) ~ as.numeric(sub("<", "", FinalResult)) / 2,
-            TRUE ~ as.numeric(FinalResult)
+            grepl("^>", FinalResult) ~ suppressWarnings(as.numeric(sub(">", "", FinalResult))),
+            grepl("^<", FinalResult) ~ suppressWarnings(as.numeric(sub("<", "", FinalResult))) / 2,
+            TRUE ~ suppressWarnings(as.numeric(trimws(FinalResult)))
           ),
           Qualifiers = case_when(
             Qualifiers == "" ~ "None",
@@ -268,8 +301,6 @@ server <- function(input, output, session) {
   # Render plot using the reactive data
   output$plot <- renderGirafe({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
-    
-    print(unique(clean_data$Description))
     
     p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
                                 tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), "<br>Result:", FinalResult))) +
