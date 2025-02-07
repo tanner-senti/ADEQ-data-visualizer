@@ -17,7 +17,7 @@ library(DT)
  # work with access databases)
 
 # Define constants
-zip_url <- "https://www.DELETEadeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
+zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
 fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
 temp_dir <- tempdir()
 
@@ -40,7 +40,7 @@ ui <- fluidPage(
     titlePanel("Water Quality Data Viewer"),
     
     # Message about the database being used
-    textOutput("db_message"),
+    htmlOutput("db_message"),
     br(),
     
     # Input panel with site and parameter selection horizontally
@@ -127,17 +127,22 @@ server <- function(input, output, session) {
         "Uid=Admin;Pwd=;", sep = ""
       ))
       temp_updated_date <- dbGetQuery(conn_access, "SELECT Updated FROM TempUpdated")
+      date_range <- dbGetQuery(conn_access, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
+      
       # Removing leading/trailing spaces here!!!
       # Run update queries to trim spaces
       dbExecute(conn_access, "UPDATE WebLIMSResults SET SamplingPoint = Trim(SamplingPoint);")
       dbExecute(conn_access, "UPDATE WebLIMSStations SET StationID = Trim(StationID);")
       dbDisconnect(conn_access)
       
-      db_message <- paste("Using most recent version of the database uploaded on ", format(temp_updated_date$Updated, "%m-%d-%Y"))
+      db_message <- paste("Using most recent version of the database uploaded on ", format(temp_updated_date$Updated, "%m-%d-%Y"),
+                          "<br>", "Data available between ", format(date_range$min_date, "%m-%d-%Y"), " and ", format(date_range$max_date, "%m-%d-%Y"))
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
-    output$db_message <- renderText({ db_message })
+    output$db_message <- renderUI({
+      HTML(db_message)
+    })
     
     database_file
   })
