@@ -1,4 +1,3 @@
-library(shiny)
 library(RSQLite)
 library(zip)
 library(DBI)
@@ -39,7 +38,7 @@ ui <- fluidPage(
     titlePanel("Water Quality Data Viewer"),
     
     # Message about the database being used
-    textOutput("db_message"),
+    htmlOutput("db_message"),
     br(),
     
     # Input panel with site and parameter selection horizontally
@@ -88,7 +87,7 @@ server <- function(input, output, session) {
         server_con <- dbConnect(
           odbc::odbc(),
           Driver   = "SQL Server",
-          Server   = "SQLDB",
+          Server   = "DPSQLS", # New, up-to-date server from IT
           Database = "WQAR_and_WebLIMS",
           Trusted_Connection = "Yes")
         
@@ -99,8 +98,21 @@ server <- function(input, output, session) {
         # Close the SQL connection
         dbDisconnect(server_con)
        
-        # Save tables to temp sqlite database
+        # Save tables to temp_dir sqlite database - use this connection for rest of app!
         runjs('document.getElementById("loading-message").textContent = "Initializing database...";')
+        
+        # Create sqlite database for data
+        full_con <- dbConnect(RSQLite::SQLite(), paste0(temp_dir, "/weblims_full.sqlite"))
+        
+        # Convert Date to character for SQLite compatibility (must convert back to date whenever read in):
+        WebLIMSResults$DateSampled <- as.character(WebLIMSResults$DateSampled)
+        
+        dbWriteTable(full_con, "WebLIMSResults", WebLIMSResults, overwrite = TRUE)
+        dbWriteTable(full_con, "WebLIMSStations", WebLIMSStations, overwrite = TRUE)
+        
+        dbDisconnect(full_con)
+        
+        database_file <- paste0(temp_dir, "/weblims_full.sqlite")
    
       }, error = function(e) {
         message("Error fetching or initializing data.:", e$message)
@@ -114,146 +126,151 @@ server <- function(input, output, session) {
       
       conn_sqlite <- dbConnect(RSQLite::SQLite(), database_file)
       
-      # Fetch the tables:
-      WebLIMSResults <- dbReadTable(conn_sqlite, "WebLIMSResults")
-      WebLIMSStations  <- dbReadTable(conn_sqlite, "WebLIMSStations")
-      
+      # Get the data range for backup data:
+      date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
+     
+       # FIX the leading/trailing spaces for SQLITE here:
+      # Run update queries to trim spaces
+      dbExecute(conn_sqlite, "UPDATE WebLIMSResults SET SamplingPoint = TRIM(SamplingPoint);")
+      dbExecute(conn_sqlite, "UPDATE WebLIMSStations SET StationID = TRIM(StationID);")
       dbDisconnect(conn_sqlite)
       
-      # Get date range:
-      date_min <- min(WebLIMSResults$DateSampled)
-      date_max <- max(WebLIMSResults$DateSampled)
-      
-      db_message <- paste("Using backup database. Data available between ", date_min, " and ", date_max)
+      db_message <- paste("Using backup database - data available between ", date_range$min_date, " and ", date_range$max_date)
     
       } else {
-      # Fetch the dates for full database:
-      date_min <- min(WebLIMSResults$DateSampled)
-      date_max <- max(WebLIMSResults$DateSampled)
-      
-      db_message <- paste0("Using most recent version of the database. Data available between ", 
-                          format(date_min, "%m-%d-%Y"), " and ", format(date_max, "%m-%d-%Y"))
+        # Fetch the date range from SQLite
+        full_con <- dbConnect(RSQLite::SQLite(), database_file)
+        
+        # Rename StationID to SamplingPoint to reduce errors:
+        dbExecute(full_con, "ALTER TABLE WebLIMSResults RENAME COLUMN StationID to SamplingPoint")
+        
+        date_range <- dbGetQuery(full_con, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
+        # FIX the leading/trailing spaces for SQLITE here:
+        # Run update queries to trim spaces
+        dbExecute(full_con, "UPDATE WebLIMSResults SET SamplingPoint = TRIM(SamplingPoint);")
+        dbExecute(full_con, "UPDATE WebLIMSStations SET StationID = TRIM(StationID);")
+        dbDisconnect(full_con)
+        
+        db_message <- paste("Using most recent version of the database:",
+                            "<br>", "Data available between ", date_range$min_date, " and ", date_range$max_date)
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
-    output$db_message <- renderText({ db_message })
-    
-    # # Remove whitespace then leftoin description to sites, creating ONE object
-    WebLIMSStations <- WebLIMSStations %>% 
-      mutate(StationID = str_trim(StationID)) %>% 
-      distinct(StationID, .keep_all = TRUE)
-    WebLIMSall <- WebLIMSResults %>% 
-      mutate(StationID = str_trim(StationID)) %>% 
-      left_join(WebLIMSStations, by = "StationID")
-    
-    return(WebLIMSall)
+   
+     output$db_message <- renderUI({
+      HTML(db_message)
+    })
+    # Output is path to database file (either full SQLite or backup SQLite)
+    database_file
   })
   
-  # Step 2: Call the fetch data function and store it:
-  fetched_data <- reactiveVal(NULL)  # Store data once
-
-  observe({
-    data <- fetch_data()
-    if (!is.null(data)) {
-      fetched_data(data)  # Store the fetched data
-    }
-  })
-
-  
-  
-  # Step 3: Pull a list of sites from SamplingPoint
-  site_list <- reactiveVal(NULL)  # Store site list globally
-  
+  # Step 2: Pull a list of sites from StationID
   get_sites_from_data <- reactive({
-    data <- fetched_data()  # Retrieve the stored data
-    if (is.null(data)) return(NULL)  # Prevent errors if data isn't ready
- 
-    # Grab just site info
-    site_info <- data %>% 
-      select("StationID", "Description") %>% 
-      distinct
+    database_file <- fetch_data()
+    con <- NULL
     
-    # Ensure distinct site names with descriptions
-    # site_info <- unique(site_info[, c("StationID", "Description")])  
-    site_list(site_info)  # Cache site list for faster lookups
-    return(site_info)
+    # Connect to SQLite database
+    con <- dbConnect(RSQLite::SQLite(), database_file)
+    
+    if (!is.null(con)) {
+      query <- "SELECT DISTINCT SamplingPoint, WebLIMSStations.Description
+                FROM WebLIMSResults
+                LEFT JOIN WebLIMSStations ON WebLIMSResults.SamplingPoint = WebLIMSStations.StationID"
+      site_names <- dbGetQuery(con, query)
+      dbDisconnect(con)
+      
+      return(site_names)
+    }
+    return(NULL)
     })
   
-  # Step 4: Populate dropdown with site options
+  # Step 3: Populate dropdown with site options
   observe({
     site_info <- get_sites_from_data()
     req(site_info)  # Ensure data exists before updating UI
-    updateSelectizeInput(session, "site", choices = site_info$StationID, server = TRUE)
-    updateSelectizeInput(session, "description", choices = unique(site_info$Description), server = TRUE)
+    suppressWarnings(updateSelectizeInput(session, "site", choices = site_info$SamplingPoint, server = FALSE)) # Set to FALSE during debugging
+    suppressWarnings(updateSelectizeInput(session, "description", choices = site_info$Description, server = FALSE))
   })
   
+  # Step 4: Observer a description seletion, update the site input:
   observeEvent(input$description, {
     req(input$description)
+    site_id <- get_sites_from_data() %>% 
+      filter(Description == input$description) %>% 
+      pull(SamplingPoint)
     
-    site_info <- get_sites_from_data()
-    if (!is.null(site_info) && input$description %in% site_info$Description) {
-      site_id <- site_info %>% filter(Description == input$description) %>% pull(StationID)
-      
-      # Ensure a single selection
-      if (length(site_id) > 0) {
-        updateSelectizeInput(session, "site", selected = site_id[1])
-        
-        # Fetch data for the new site to update parameters
-        data <- fetched_data()
-        if (!is.null(data) && "WebParameter" %in% colnames(data)) {
-          parameters <- data %>%
-            filter(StationID == site_id[1]) %>%
-            distinct(WebParameter) %>%
-            pull(WebParameter)
-          
-          updateSelectizeInput(session, "parameter", choices = parameters, server = TRUE)
-        }
-      }
+    if (length(site_id) > 0) {
+      updateSelectizeInput(session, "site", selected = site_id)
     }
   })
   
-  
-  
-  # Single observeEvent block for site selection and parameter update
+  # Step 5: Fix the observeEvent for site selection to correctly update description
   observeEvent(input$site, {
     req(input$site)
     
-    site_info <- get_sites_from_data()
-    if (!is.null(site_info)) {
-      description <- site_info %>% filter(StationID == input$site) %>% pull(Description)
-      if (length(description) > 0) {
-        updateSelectizeInput(session, "description", selected = description[1])
-      }
-    }
+    description <- get_sites_from_data() %>%
+      filter(SamplingPoint == input$site) %>%
+      pull(Description)
     
-    data <- fetched_data()
-    if (!is.null(data) && "WebParameter" %in% colnames(data)) {
-      parameters <- data %>%
-        filter(StationID == input$site) %>%
-        distinct(WebParameter) %>%
-        pull(WebParameter)
-      
-      updateSelectizeInput(session, "parameter", choices = parameters, server = TRUE)
+    if (length(description) > 0) {
+      updateSelectizeInput(session, "description", selected = description)
     }
   })
   
-  # Step 8: Query data for the selected site and parameter
+  # Step 6: Dynamically update parameter options based on site selection
+  observeEvent(input$site, {
+    req(input$site)  # Ensure the site is selected
+    
+    # Fetch parameters for the selected site
+    database_file <- fetch_data()
+    con <- NULL
+    
+    # Connect to SQLite database (fallback)
+    con <- dbConnect(RSQLite::SQLite(), database_file)
+    
+    if (!is.null(con)) {
+      query <- paste("SELECT DISTINCT WebParameter FROM WebLIMSResults WHERE SamplingPoint = '", input$site, "'", sep = "")
+      parameters <- dbGetQuery(con, query)
+      dbDisconnect(con)
+      
+      updateSelectizeInput(session, "parameter", choices = parameters$WebParameter, server = TRUE)
+    }
+  })
+  
+  # Step 7: Query data for the selected site and parameter
   get_data_for_plot_and_table <- reactive({
     req(input$site, input$parameter)  # Ensure both site and parameter are selected
     
-    # Use the stored data (WebLIMSResults)
-    data <- fetched_data() # Fetch stored data
+    # Use the fetch_and_unzip_data function to get the file path
+    database_file <- fetch_data()
+    clean_data <- NULL
+    con <- NULL
     
-    # Filter data for the selected site and parameter
-    clean_data <- data %>%
-      filter(StationID == input$site, WebParameter == input$parameter)
+    # Connect to SQLite database (fallback)
+    con <- dbConnect(RSQLite::SQLite(), database_file)
+    
+    if (!is.null(con)) {
+      # query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
+      #             FROM WebLIMSResults
+      #             WHERE SamplingPoint = '", input$site, "' AND WebParameter = '", input$parameter, "'", sep = "")
+      query <- paste0(
+        "SELECT SamplingPoint, DateSampled, WebResult, Qualifier, ",
+        "RelativeDepthSample, WebParameter, WebLIMSStations.Description ",
+        "FROM WebLIMSResults ",
+        "LEFT JOIN WebLIMSStations ON WebLIMSResults.SamplingPoint = WebLIMSStations.StationID ",
+        "WHERE SamplingPoint = '", input$site, "' ",
+        "AND WebParameter = '", input$parameter, "'"
+      )
+      
+      raw_data <- dbGetQuery(con, query)
+      dbDisconnect(con)
     
     # Data cleaning here:
-    clean_data <- clean_data %>%
+    clean_data <- raw_data %>%
       rename(FinalResult = WebResult,
              Qualifiers = Qualifier,
              RelativeDepthComments = RelativeDepthSample) %>%
-      select(StationID, RelativeDepthComments, DateSampled, WebParameter, FinalResult, Qualifiers, Description) %>%
+      select(SamplingPoint, RelativeDepthComments, DateSampled, WebParameter, FinalResult, Qualifiers, Description) %>%
       mutate(
         DateSampled = as.Date(DateSampled),
         FinalResult = as.character(FinalResult),  # Ensure character before manipulation
@@ -270,17 +287,18 @@ server <- function(input, output, session) {
         ),
         Qualifiers = if_else(is.na(Qualifiers) | Qualifiers == "", "None", Qualifiers),  # Handle empty and NA values
         RelativeDepthComments = if_else(is.na(trimws(RelativeDepthComments)) | trimws(RelativeDepthComments) == "", 
-                                        "UNKNOWN", 
+                                        "N/A", 
                                         toupper(trimws(RelativeDepthComments))) 
       ) %>%
       filter(!is.na(FinalResult)) %>%  # Remove rows where FinalResult is NA
       mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
+    }
     
     return(clean_data)
   })
   
   
-  # Step 9: Use the reactive data for both plot and table
+  # Step 8: Use the reactive data for both plot and table
   # Render plot using the reactive data
   output$plot <- renderGirafe({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
@@ -290,7 +308,7 @@ server <- function(input, output, session) {
     }
   
     # Check if RelativeDepthComments has any non-NA values
-    use_size <- any(clean_data$RelativeDepthComments != "UNKNOWN")
+    use_size <- any(clean_data$RelativeDepthComments != "N/A")
     
     # Base plot (no size or Relative Depth):
     p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
@@ -319,7 +337,7 @@ server <- function(input, output, session) {
         geom_point_interactive(aes(size = RelativeDepthComments, color = Qualifiers, shape = DL), alpha = 0.7) +
         # scale_shape_manual(values = c("Measured value" = 16, "<DL" = 17, ">DL" = 17)) +
         scale_size_manual(values = c("EPILIMNION" = 2.5, "HYPOLIMNION" = 5.5,
-                                     "THERMOCLINE" = 4, "MID-DEPTH" = 4, "UNKNOWN" = 7),
+                                     "THERMOCLINE" = 4, "MID-DEPTH" = 4, "N/A" = 7),
                           name = "Relative Depth",
                           drop = TRUE)
     }
@@ -331,7 +349,7 @@ server <- function(input, output, session) {
   output$data_table <- DT::renderDT({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
     
-    DT::datatable(clean_data[, c("StationID", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers", "RelativeDepthComments")],
+    DT::datatable(clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers", "RelativeDepthComments")],
                   colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers", "Relative Depth"),
                   options = list(
                     pageLength = 20,
