@@ -1,4 +1,3 @@
-library(RSQLite)
 library(zip)
 library(DBI)
 library(dplyr)
@@ -9,6 +8,7 @@ library(shinycssloaders)
 library(shinyjs)
 library(DT)
 library(stringr)
+library(duckdb)
 
 # This app will work locally on a windows machine, or hosted on a microsoft server
 # with windows. 
@@ -16,7 +16,7 @@ library(stringr)
 # This is a test version to pull from the SQL Server instead of the website access database!!
 
 # Define constants
-fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
+fallback_data_path <- "Data/WebLIMS_backup.duckdb" # Update this with better database
 temp_dir <- tempdir()
 
 
@@ -102,7 +102,7 @@ server <- function(input, output, session) {
         runjs('document.getElementById("loading-message").textContent = "Initializing database...";')
         
         # Create sqlite database for data
-        full_con <- dbConnect(RSQLite::SQLite(), paste0(temp_dir, "/weblims_full.sqlite"))
+        full_con <- dbConnect(duckdb::duckdb(), paste0(temp_dir, "/weblims_full.duckdb"))
         
         # Convert Date to character for SQLite compatibility (must convert back to date whenever read in):
         WebLIMSResults$DateSampled <- as.character(WebLIMSResults$DateSampled)
@@ -112,7 +112,7 @@ server <- function(input, output, session) {
         
         dbDisconnect(full_con)
         
-        database_file <- paste0(temp_dir, "/weblims_full.sqlite")
+        database_file <- paste0(temp_dir, "/weblims_full.duckdb")
    
       }, error = function(e) {
         message("Error fetching or initializing data.:", e$message)
@@ -124,7 +124,7 @@ server <- function(input, output, session) {
       # Use SQLite if no Access database is available
       database_file <- fallback_data_path
       
-      conn_sqlite <- dbConnect(RSQLite::SQLite(), database_file)
+      conn_sqlite <- dbConnect(duckdb::duckdb(), database_file)
       
       # Get the data range for backup data:
       date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
@@ -139,7 +139,7 @@ server <- function(input, output, session) {
     
       } else {
         # Fetch the date range from SQLite
-        full_con <- dbConnect(RSQLite::SQLite(), database_file)
+        full_con <- dbConnect(duckdb::duckdb(), database_file)
         
         # Rename StationID to SamplingPoint to reduce errors:
         dbExecute(full_con, "ALTER TABLE WebLIMSResults RENAME COLUMN StationID to SamplingPoint")
@@ -170,7 +170,7 @@ server <- function(input, output, session) {
     con <- NULL
     
     # Connect to SQLite database
-    con <- dbConnect(RSQLite::SQLite(), database_file)
+    con <- dbConnect(duckdb::duckdb(), database_file)
     
     if (!is.null(con)) {
       query <- "SELECT DISTINCT SamplingPoint, WebLIMSStations.Description
@@ -226,7 +226,7 @@ server <- function(input, output, session) {
     con <- NULL
     
     # Connect to SQLite database (fallback)
-    con <- dbConnect(RSQLite::SQLite(), database_file)
+    con <- dbConnect(duckdb::duckdb(), database_file)
     
     if (!is.null(con)) {
       query <- paste("SELECT DISTINCT WebParameter FROM WebLIMSResults WHERE SamplingPoint = '", input$site, "'", sep = "")
@@ -247,7 +247,7 @@ server <- function(input, output, session) {
     con <- NULL
     
     # Connect to SQLite database (fallback)
-    con <- dbConnect(RSQLite::SQLite(), database_file)
+    con <- dbConnect(duckdb::duckdb(), database_file)
     
     if (!is.null(con)) {
       # query <- paste("SELECT SamplingPoint, DateSampled, FinalResult, Qualifiers, RelativeDepthComments, WebParameter
