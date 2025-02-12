@@ -10,6 +10,10 @@ library(DT)
 library(stringr)
 library(duckdb)
 
+# Load the server information:
+readRenviron("~/.Renviron")
+
+
 # This app will work locally on a windows machine connected to the ADEQ network, 
 # or hosted on a server by ADEQ IT.
 
@@ -85,8 +89,8 @@ server <- function(input, output, session) {
         server_con <- dbConnect(
           odbc::odbc(),
           Driver   = "SQL Server",
-          Server   = "INPUT_SERVER_HERE", # Use new, up-to-date server from IT
-          Database = "WQAR_and_WebLIMS",
+          Server = Sys.getenv("SQL_SERVER"),
+          Database = Sys.getenv("SQL_DATABASE"),
           Trusted_Connection = "Yes")
         
         WebLIMSResults <- dbReadTable(server_con, "WebLIMSResults")
