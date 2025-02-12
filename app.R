@@ -10,15 +10,15 @@ library(DT)
 library(stringr)
 library(duckdb)
 
-# This app will work locally on a windows machine, or hosted on a microsoft server
-# with windows. 
+# This app will work locally on a windows machine connected to the ADEQ network, 
+# or hosted on a server by ADEQ IT.
 
-# This is a test version to pull from the SQL Server instead of the website access database!!
+# This version of the app will connect directly to the SQL Server database and
+# pull the data. IF this connection fails, will default to smaller backup database.
 
 # Define constants
 fallback_data_path <- "Data/WebLIMS_backup.duckdb" # Update this with better database
 temp_dir <- tempdir()
-
 
 # Define UI
 ui <- fluidPage(
@@ -62,7 +62,7 @@ ui <- fluidPage(
     
     # Table under the single plot:
     div(
-      style = "width: 85%; margin-top: 20px; max-width: 1000px",
+      style = "width: 85%; margin-top: 20px; max-width: 700px",
       DT::DTOutput("data_table")  # This will render the table
     )
   )
@@ -80,8 +80,6 @@ server <- function(input, output, session) {
     server_grab <- FALSE
     database_file <- NULL
     db_message <- NULL
-    
-    is_linux <- Sys.info()[["sysname"]] == "Linux"
 
       tryCatch({
         server_con <- dbConnect(
@@ -119,9 +117,10 @@ server <- function(input, output, session) {
       })
     
     
-    if (is_linux || !server_grab) {
+    if (!server_grab) {
       runjs('document.getElementById("loading-message").textContent = "Using backup database...";')
       # Use SQLite if no Access database is available
+      # ENSURE backup database column names and types are identical to SQL Server!!!
       database_file <- fallback_data_path
       
       conn_sqlite <- dbConnect(duckdb::duckdb(), database_file)
@@ -152,7 +151,7 @@ server <- function(input, output, session) {
         dbDisconnect(full_con)
         
         db_message <- paste("Using most recent version of the database:",
-                            "<br>", "Data available between ", date_range$min_date, " and ", date_range$max_date)
+                            "<br>", "Data available between ", format(as.Date(date_range$min_date), "%m-%d-%Y"), " and ", format(as.Date(date_range$max_date), "%m-%d-%Y"))
     }
     
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
@@ -312,7 +311,7 @@ server <- function(input, output, session) {
     
     # Base plot (no size or Relative Depth):
     p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
-                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"), 
+                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"),
                                                 "<br>Result:", FinalResult,
                                                 #"<br>Value:", DL, # weird display issue 
                                                 "<br>Qualifiers:", Qualifiers,
@@ -349,18 +348,21 @@ server <- function(input, output, session) {
   output$data_table <- DT::renderDT({
     clean_data <- get_data_for_plot_and_table()  # Get cleaned data
     
+    clean_data$DateSampled <- format(as.Date(clean_data$DateSampled), "%m-%d-%Y")
+    
     DT::datatable(clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers", "RelativeDepthComments")],
                   colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers", "Relative Depth"),
+                  extensions = 'Buttons',  # Enable buttons extension
                   options = list(
-                    pageLength = 20,
+                    pageLength = 15,
                     autoWidth = TRUE,
-                    dom = "Bfrtip",  # This controls the placement of buttons like 'copy', 'csv', etc
-                    buttons = c("copy", "csv", "excel"),
+                    dom = "Bfrtip",  # This controls the placement of buttons
+                    buttons = list(list(extend = "csv", text = "Download CSV")),
                     searching = FALSE,  # Disable the search function
                     columnDefs = list(
                       list(
                         targets = 2,  # The "Date" column is at index 2 (third column)
-                        width = '250px'  # Adjust the width as needed (in pixels or percentages)
+                        width = '260px'  # Adjust the width as needed (in pixels or percentages)
                       )
                     )
                   ),
