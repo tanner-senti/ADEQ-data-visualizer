@@ -84,7 +84,6 @@ server <- function(input, output, session) {
     server_grab <- FALSE
     database_file <- NULL
     db_message <- NULL
-<<<<<<< HEAD
     
     tryCatch({
       server_con <- dbConnect(
@@ -120,43 +119,6 @@ server <- function(input, output, session) {
     }, error = function(e) {
       message("Error fetching or initializing data.:", e$message)
     })
-=======
-
-      tryCatch({
-        server_con <- dbConnect(
-          odbc::odbc(),
-          Driver   = "SQL Server",
-          Server = Sys.getenv("SQL_SERVER"),
-          Database = Sys.getenv("SQL_DATABASE"),
-          Trusted_Connection = "Yes")
-        
-        WebLIMSResults <- dbReadTable(server_con, "WebLIMSResults")
-        WebLIMSStations  <- dbReadTable(server_con, "WebLIMSStations")
-        server_grab <- TRUE
-        
-        # Close the SQL connection
-        dbDisconnect(server_con)
-       
-        # Save tables to temp_dir sqlite database - use this connection for rest of app!
-        runjs('document.getElementById("loading-message").textContent = "Initializing database...";')
-        
-        # Create sqlite database for data
-        full_con <- dbConnect(duckdb::duckdb(), paste0(temp_dir, "/weblims_full.duckdb"))
-        
-        # Convert Date to character for SQLite compatibility (must convert back to date whenever read in):
-        WebLIMSResults$DateSampled <- as.character(WebLIMSResults$DateSampled)
-        
-        dbWriteTable(full_con, "WebLIMSResults", WebLIMSResults, overwrite = TRUE)
-        dbWriteTable(full_con, "WebLIMSStations", WebLIMSStations, overwrite = TRUE)
-        
-        dbDisconnect(full_con)
-        
-        database_file <- paste0(temp_dir, "/weblims_full.duckdb")
-   
-      }, error = function(e) {
-        message("Error fetching or initializing data.:", e$message)
-      })
->>>>>>> 6922f4ad9daf5dcf7e68ee8939b4d30d877c3e76
     
     
     if (!server_grab) {
@@ -169,20 +131,14 @@ server <- function(input, output, session) {
       
       # Get the data range for backup data:
       date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
-<<<<<<< HEAD
       
       # FIX the leading/trailing spaces for SQLITE here:
-=======
-     
-       # FIX the leading/trailing spaces for SQLITE here:
->>>>>>> 6922f4ad9daf5dcf7e68ee8939b4d30d877c3e76
       # Run update queries to trim spaces
       dbExecute(conn_sqlite, "UPDATE WebLIMSResults SET SamplingPoint = TRIM(SamplingPoint);")
       dbExecute(conn_sqlite, "UPDATE WebLIMSStations SET StationID = TRIM(StationID);")
       dbDisconnect(conn_sqlite)
       
       db_message <- paste("Using backup database - data available between ", date_range$min_date, " and ", date_range$max_date)
-<<<<<<< HEAD
       
     } else {
       # Fetch the date range from SQLite
@@ -205,30 +161,6 @@ server <- function(input, output, session) {
     runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
     
     output$db_message <- renderUI({
-=======
-    
-      } else {
-        # Fetch the date range from SQLite
-        full_con <- dbConnect(duckdb::duckdb(), database_file)
-        
-        # Rename StationID to SamplingPoint to reduce errors:
-        dbExecute(full_con, "ALTER TABLE WebLIMSResults RENAME COLUMN StationID to SamplingPoint")
-        
-        date_range <- dbGetQuery(full_con, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
-        # FIX the leading/trailing spaces for SQLITE here:
-        # Run update queries to trim spaces
-        dbExecute(full_con, "UPDATE WebLIMSResults SET SamplingPoint = TRIM(SamplingPoint);")
-        dbExecute(full_con, "UPDATE WebLIMSStations SET StationID = TRIM(StationID);")
-        dbDisconnect(full_con)
-        
-        db_message <- paste("Using most recent version of the database:",
-                            "<br>", "Data available between ", format(as.Date(date_range$min_date), "%m-%d-%Y"), " and ", format(as.Date(date_range$max_date), "%m-%d-%Y"))
-    }
-    
-    runjs('document.getElementById("loading-overlay").style.display = "none";')  # Hide overlay after success
-   
-     output$db_message <- renderUI({
->>>>>>> 6922f4ad9daf5dcf7e68ee8939b4d30d877c3e76
       HTML(db_message)
     })
     # Output is path to database file (either full SQLite or backup SQLite)
@@ -253,11 +185,7 @@ server <- function(input, output, session) {
       return(site_names)
     }
     return(NULL)
-<<<<<<< HEAD
   })
-=======
-    })
->>>>>>> 6922f4ad9daf5dcf7e68ee8939b4d30d877c3e76
   
   # Step 3: Populate dropdown with site options
   observe({
@@ -339,7 +267,6 @@ server <- function(input, output, session) {
       
       raw_data <- dbGetQuery(con, query)
       dbDisconnect(con)
-<<<<<<< HEAD
       
       # Data cleaning here:
       clean_data <- raw_data %>%
@@ -368,36 +295,6 @@ server <- function(input, output, session) {
         ) %>%
         filter(!is.na(FinalResult)) %>%  # Remove rows where FinalResult is NA
         mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
-=======
-    
-    # Data cleaning here:
-    clean_data <- raw_data %>%
-      rename(FinalResult = WebResult,
-             Qualifiers = Qualifier,
-             RelativeDepthComments = RelativeDepthSample) %>%
-      select(SamplingPoint, RelativeDepthComments, DateSampled, WebParameter, FinalResult, Qualifiers, Description) %>%
-      mutate(
-        DateSampled = as.Date(DateSampled),
-        FinalResult = as.character(FinalResult),  # Ensure character before manipulation
-        FinalResult = gsub("[^0-9.<>=]", "", FinalResult),  # Remove any non-numeric characters except <, >, .
-        DL = case_when(
-          grepl("^>", FinalResult) ~ ">DL",
-          grepl("^<", FinalResult) ~ "<DL",
-          TRUE ~ "Measured value"
-        ),
-        FinalResult = case_when(
-          grepl("^>", FinalResult) ~ suppressWarnings(as.numeric(sub(">", "", FinalResult))),
-          grepl("^<", FinalResult) ~ suppressWarnings(as.numeric(sub("<", "", FinalResult))) / 2,
-          TRUE ~ suppressWarnings(as.numeric(trimws(FinalResult)))
-        ),
-        Qualifiers = if_else(is.na(Qualifiers) | Qualifiers == "", "None", Qualifiers),  # Handle empty and NA values
-        RelativeDepthComments = if_else(is.na(trimws(RelativeDepthComments)) | trimws(RelativeDepthComments) == "", 
-                                        "N/A", 
-                                        toupper(trimws(RelativeDepthComments))) 
-      ) %>%
-      filter(!is.na(FinalResult)) %>%  # Remove rows where FinalResult is NA
-      mutate(across(c(Qualifiers, RelativeDepthComments, DL), as.factor))
->>>>>>> 6922f4ad9daf5dcf7e68ee8939b4d30d877c3e76
     }
     
     return(clean_data)
@@ -412,11 +309,7 @@ server <- function(input, output, session) {
     if (nrow(clean_data) == 0) {
       return(NULL)  # Return nothing if data is empty
     }
-<<<<<<< HEAD
     
-=======
-  
->>>>>>> 6922f4ad9daf5dcf7e68ee8939b4d30d877c3e76
     # Check if RelativeDepthComments has any non-NA values
     use_size <- any(clean_data$RelativeDepthComments != "N/A")
     
