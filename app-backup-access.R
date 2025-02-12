@@ -1,5 +1,5 @@
 library(shiny)
-library(RSQLite)
+library(duckdb)
 library(zip)
 library(DBI)
 library(dplyr)
@@ -10,15 +10,18 @@ library(shinycssloaders)
 library(shinyjs)
 library(DT)
 
-# This app will work locally on a windows machine, or hosted on a microsoft server
+# This app will work locally on a windows machine or hosted on a microsoft server
 # with windows. 
 
-# If hosted on shinyapps (linux), will default to backup sqlite database (cannot pull and
+# If hosted on shinyapps (linux), will default to backup duckdb database (cannot pull and
  # work with access databases)
+
+# This is an inefficient version of the app that works locally, outside ADEQ servers.
+# IF hosted on a linux server, the app should still work but will use the data backup.
 
 # Define constants
 zip_url <- "https://www.adeq.state.ar.us/downloads/WebDatabases/TechnicalServices/WQARWebLIMS/WQARWebLIMS_web.zip"
-fallback_data_path <- "Data/WebLIMS_sql2.sqlite" # Update this with better database
+fallback_data_path <- "Data/WebLIMS_backup.duckdb" # Update this with better database
 temp_dir <- tempdir()
 
 
@@ -35,9 +38,13 @@ ui <- fluidPage(
   
   # Centering the content
   div(
-    style = "display: flex; flex-direction: column; align-items: center; justify-content: center;",
+    style = "display: flex; flex-direction: column; align-items: center; justify-content: center; width: 80%; margin: 0 auto;",
     
     titlePanel("Water Quality Data Viewer"),
+    HTML('<h4 style="text-align: center;">This is an unofficial web app developed to view Water Quality Monitoring Data',
+         ' from the Arkansas Department of Energy and Environment.',
+         ' <a href="https://www.adeq.state.ar.us/techsvs/env_multi_lab/water_quality_station.aspx#Display" 
+         target="_blank">Click here for more information and data availability.</a></h4>'),
     
     # Message about the database being used
     htmlOutput("db_message"),
@@ -64,9 +71,11 @@ ui <- fluidPage(
     
     # Table under the single plot:
     div(
-      style = "width: 85%; margin-top: 20px; max-width: 1000px",
+      style = "width: 85%; margin-top: 20px; max-width: 700px",
       DT::DTOutput("data_table")  # This will render the table
-    )
+    ),
+    
+    h5("Developed by Tanner Senti (2025)")
   )
 )
 
@@ -110,7 +119,7 @@ server <- function(input, output, session) {
       # Use SQLite if no Access database is available
       database_file <- fallback_data_path
       # Fetch the date range from SQLite
-      conn_sqlite <- dbConnect(RSQLite::SQLite(), database_file)
+      conn_sqlite <- dbConnect(duckdb(), database_file)
       date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
       # FIX the leading/trailing spaces for SQLITE here:
       # Run update queries to trim spaces
@@ -161,7 +170,7 @@ server <- function(input, output, session) {
       ))
     } else {
       # Connect to SQLite database (fallback)
-      con <- dbConnect(RSQLite::SQLite(), database_file)
+      con <- dbConnect(duckdb(), database_file)
     }
     
     if (!is.null(con)) {
@@ -225,7 +234,7 @@ server <- function(input, output, session) {
       ))
     } else {
       # Connect to SQLite database (fallback)
-      con <- dbConnect(RSQLite::SQLite(), database_file)
+      con <- dbConnect(duckdb(), database_file)
     }
     
     if (!is.null(con)) {
@@ -255,7 +264,7 @@ server <- function(input, output, session) {
       ))
     } else {
       # Connect to SQLite database (fallback)
-      con <- dbConnect(RSQLite::SQLite(), database_file)
+      con <- dbConnect(duckdb(), database_file)
     }
     
     if (!is.null(con)) {
@@ -353,16 +362,17 @@ server <- function(input, output, session) {
     
     DT::datatable(clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers", "RelativeDepthComments")],
                   colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers", "Relative Depth"),
+                  extensions = 'Buttons',  # Enable buttons extension
                   options = list(
-                    pageLength = 20,
+                    pageLength = 15,
                     autoWidth = TRUE,
-                    dom = "Bfrtip",  # This controls the placement of buttons like 'copy', 'csv', etc
-                    buttons = c("copy", "csv", "excel"),
+                    dom = "Bfrtip",  # This controls the placement of buttons
+                    buttons = list(list(extend = "csv", text = "Download CSV")),
                     searching = FALSE,  # Disable the search function
                     columnDefs = list(
                       list(
                         targets = 2,  # The "Date" column is at index 2 (third column)
-                        width = '250px'  # Adjust the width as needed (in pixels or percentages)
+                        width = '260px'  # Adjust the width as needed (in pixels or percentages)
                       )
                     )
                   ),
