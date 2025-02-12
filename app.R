@@ -85,7 +85,7 @@ server <- function(input, output, session) {
         server_con <- dbConnect(
           odbc::odbc(),
           Driver   = "SQL Server",
-          Server   = "DPSQLS", # New, up-to-date server from IT
+          Server   = "INPUT_SERVER_HERE", # Use new, up-to-date server from IT
           Database = "WQAR_and_WebLIMS",
           Trusted_Connection = "Yes")
         
