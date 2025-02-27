@@ -89,7 +89,7 @@ server <- function(input, output, session) {
       server_con <- dbConnect(
         odbc::odbc(),
         Driver   = "SQL Server",
-        Server = Sys.getenv("SQL_SERVER"),
+        Server = Sys.getenv("SQL_SERVER"), #Testing, fix this 
         Database = Sys.getenv("SQL_DATABASE"),
         Trusted_Connection = "Yes")
       
