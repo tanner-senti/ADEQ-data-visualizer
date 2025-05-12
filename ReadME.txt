@@ -16,7 +16,7 @@ There is a backup script "app-backup-access.R" that functions the exact same,
 except this version will download the entire WebLIMS database Access file that is
 publicly available on DEQ's website.
 
-This alternative method will work, however it is much slower. Note that this method:
+This alternative method will work, however it is much slower. Note that this alternative method:
 	- Will work on any windows laptop, even if not connected to DEQ IT's servers
 		-i.e. you can run this app on your personal laptop at home
 	- Will NOT work if hosted (linux cannot work with Access files)

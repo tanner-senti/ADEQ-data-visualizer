@@ -11,8 +11,7 @@ library(stringr)
 library(duckdb)
 
 # Load the server information:
-readRenviron("~/.Renviron")
-
+readRenviron(".Renviron")
 
 # This app will work locally on a windows machine connected to the ADEQ network, 
 # or hosted on a server by ADEQ IT.
@@ -315,7 +314,7 @@ server <- function(input, output, session) {
     
     # Base plot (no size or Relative Depth):
     p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
-                                tooltip = paste("Date:", format(DateSampled, "%m-%d-%Y"),
+                                tooltip = paste("Date:", format(DateSampled, "%Y-%m-%d"),
                                                 "<br>Result:", FinalResult,
                                                 #"<br>Value:", DL, # weird display issue 
                                                 "<br>Qualifiers:", Qualifiers,
@@ -332,6 +331,7 @@ server <- function(input, output, session) {
         color = "Qualifiers",
         shape = "Values"
       ) +
+      scale_x_date(date_labels = "%Y-%m-%d") +
       theme( axis.text.x = element_text(angle = 45, hjust =1))
     
     # Add size mapping only if RelativeDepthComments is not all NA
