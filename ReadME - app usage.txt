@@ -21,6 +21,10 @@ This alternative method will work, however it is much slower. Note that this alt
 		-i.e. you can run this app on your personal laptop at home
 	- Will NOT work if hosted (linux cannot work with Access files)
 
+Important: To use the backup Access version of the app, you must first rename "app.R" to something
+else - I suggest "app_sql.R", then rename the access backup app to "app.R". Shiny apps will only run
+if the app script is named "app.R", and you cannot have two files with identical names in the same folder.
+
 NOTE:
 If there is an error downloading the data, the app will revert to a backup database.
 This database is just a small selection of data (~2016 - 2024) so that the app still

@@ -25,6 +25,7 @@ temp_dir <- tempdir()
 
 # Define UI
 ui <- fluidPage(
+  theme = bslib::bs_theme(bootswatch = "flatly"),  # Try "cosmo", "flatly", or "sandstone"
   useShinyjs(), # Shinyjs for data loading panels
   div(
     id = "loading-overlay",
@@ -44,17 +45,43 @@ ui <- fluidPage(
     htmlOutput("db_message"),
     br(),
     
+    tags$head(
+      # Making input labels bold:
+      tags$style(HTML("
+    .control-label {
+      font-weight: bold;
+    }
+  "))
+    ),
+    
     # Input panel with site and parameter selection horizontally
-    div(
-      style = "display: flex; justify-content: center; gap: 10px;",
+    wellPanel(
+      fluidRow(
       selectizeInput("site", "Search by SiteID:", choices = NULL, multiple = FALSE, 
                      options = list(placeholder = "Search...", maxOptions = 1000), 
                      width = "200px"),
       selectizeInput("description", "Search by description:", choices = NULL, multiple = FALSE, 
-                     options = list(placeholder = "Search...", maxOptions = 1000)),
-      selectizeInput("parameter", "Search or select a parameter:", choices = NULL, multiple = FALSE, 
+                     options = list(placeholder = "Search...", maxOptions = 1000))
+      ),
+      fluidRow(
+      selectizeInput("parameter", "Choose a parameter:", choices = NULL, multiple = FALSE, 
                      options = list(placeholder = "Search...", maxOptions = 1000), 
-                     width = "200px")
+                     width = "200px"),
+      dateRangeInput("date_range", "Filter by date:",
+                     start = NULL, end = NULL, 
+                     format = "yyyy-mm-dd", 
+                     width = "300px")
+      )
+    ),
+    
+    br(),
+    
+    # Download plot button - Custom styled with icon
+    div(
+      style = "width: 60%; max-width: 700px; text-align: left; margin-bottom: 10px;",
+      downloadButton("download_plot", 
+                     label = tagList("Download Plot"),
+                     style = "font-size: 16px; padding: 10px; background-color: #0080b7; color: white; border: none; border-radius: 8px;")
     ),
     
     # Plot panel
@@ -299,21 +326,37 @@ server <- function(input, output, session) {
     return(clean_data)
   })
   
-  
-  # Step 8: Use the reactive data for both plot and table
-  # Render plot using the reactive data
-  output$plot <- renderGirafe({
-    clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+  # Step 7.5: filter by date range
+  filtered_data <- reactive({
+    df <- get_data_for_plot_and_table()
+    req(df)
     
-    if (nrow(clean_data) == 0) {
-      return(NULL)  # Return nothing if data is empty
+    # Filter by selected date range
+    if (!is.null(input$date_range)) {
+      df <- df %>%
+        filter(DateSampled >= input$date_range[1],
+               DateSampled <= input$date_range[2])
     }
+    df
+  })
+  
+  observeEvent(get_data_for_plot_and_table(), {
+    df <- get_data_for_plot_and_table()
+    req(nrow(df) > 0)
     
+    updateDateRangeInput(session, "date_range",
+                         start = min(df$DateSampled, na.rm = TRUE),
+                         end = max(df$DateSampled, na.rm = TRUE))
+  })
+  
+  # Step 8: Define helper function to produce plot that output$plot and the plot
+  # download hander will utilize:
+  make_plot <- function(selected_plot_dat) {
     # Check if RelativeDepthComments has any non-NA values
-    use_size <- any(clean_data$RelativeDepthComments != "N/A")
+    use_size <- any(selected_plot_dat$RelativeDepthComments != "N/A")
     
     # Base plot (no size or Relative Depth):
-    p <- ggplot(clean_data, aes(x = DateSampled, y = FinalResult, 
+    p <- ggplot(selected_plot_dat, aes(x = DateSampled, y = FinalResult, 
                                 tooltip = paste("Date:", format(DateSampled, "%Y-%m-%d"),
                                                 "<br>Result:", FinalResult,
                                                 #"<br>Value:", DL, # weird display issue 
@@ -344,34 +387,79 @@ server <- function(input, output, session) {
                           name = "Relative Depth",
                           drop = TRUE)
     }
+    return(p)
+  }
+  
+  
+  # Step 9: Use the reactive data for both plot and table
+  # Call the reactive data, send to the plotting helper function then output here
+  output$plot <- renderGirafe({
+    # clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+    clean_data <- filtered_data()
     
-    girafe(ggobj = p)
+    if (nrow(clean_data) == 0) {
+      return(NULL)  # Return nothing if data is empty
+    }
+    
+    girafe(ggobj = make_plot(clean_data),
+           options = list(
+             opts_toolbar(
+               saveaspng = FALSE, # Show PNG download button
+             )
+           )
+           )
   })
+  
+  # Download plot button:
+  output$download_plot <- downloadHandler(
+    filename = function() {
+      paste0(input$site, "_", input$parameter, "_plot.png")
+    },
+    content = function(file) {
+      clean_data <- filtered_data()
+      if (nrow(clean_data) == 0) return(NULL)
+      
+      ggsave(file, plot = make_plot(clean_data), width = 6, height = 4, dpi = 300)
+    }
+  )
+  
   
   # Render the data table using the same reactive data
   output$data_table <- DT::renderDT({
-    clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+    #clean_data <- get_data_for_plot_and_table()  # Get cleaned data
+    clean_data <- filtered_data()
     
-    clean_data$DateSampled <- format(as.Date(clean_data$DateSampled), "%m-%d-%Y")
     
-    DT::datatable(clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers", "RelativeDepthComments")],
-                  colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers", "Relative Depth"),
-                  extensions = 'Buttons',  # Enable buttons extension
-                  options = list(
-                    pageLength = 15,
-                    autoWidth = TRUE,
-                    dom = "Bfrtip",  # This controls the placement of buttons
-                    buttons = list(list(extend = "csv", text = "Download CSV")),
-                    searching = FALSE,  # Disable the search function
-                    columnDefs = list(
-                      list(
-                        targets = 2,  # The "Date" column is at index 2 (third column)
-                        width = '260px'  # Adjust the width as needed (in pixels or percentages)
-                      )
-                    )
-                  ),
-                  rownames = FALSE)
-  })
+    clean_data$DateSampled <- format(as.Date(clean_data$DateSampled), "%Y-%m-%d")
+    
+    DT::datatable(
+      clean_data[, c("SamplingPoint", "WebParameter","DateSampled", "FinalResult", "DL", "Qualifiers", "RelativeDepthComments")],
+      colnames = c("Site", "Parameter", "Date", "Result", "Detection Limit", "Qualifiers", "Relative Depth"),
+      callback=JS('$("button.buttons-csv").css("background","#0080b7"); 
+                    return table;'),
+      extensions = 'Buttons',
+      options = list(
+        pageLength = 10,
+        autoWidth = TRUE,
+        dom = "Bfrtip",
+        buttons = list(
+          list(
+            extend = "csv",
+            text = "Download CSV",
+            filename = paste0(input$site, "_", input$parameter),
+            exportOptions = list(
+              modifier = list(page = "all")
+            )
+          )
+        ),
+        searching = FALSE,
+        columnDefs = list(
+          list(targets = 2, width = '260px')
+        )
+      ),
+      rownames = FALSE
+    )
+  }, server = FALSE) 
   
 }
 
