@@ -38,7 +38,7 @@ ui <- fluidPage(
   # Centering the content
   div(
     style = "display: flex; flex-direction: column; align-items: center; justify-content: center;",
-    
+    br(),
     titlePanel("Water Quality Data Viewer"),
     
     # Message about the database being used
@@ -94,6 +94,12 @@ ui <- fluidPage(
     div(
       style = "width: 85%; margin-top: 20px; max-width: 700px",
       DT::DTOutput("data_table")  # This will render the table
+    ),
+    
+    # Footer
+    tags$footer(
+      style = "width: 100%; text-align: center; padding: 10px; margin-top: 40px; background-color: #f8f9fa; color: #6c757d; border-top: 1px solid #dee2e6;",
+      "Made by Tanner Senti for Arkansas Division of Environmental Quality"
     )
   )
 )
@@ -105,7 +111,7 @@ server <- function(input, output, session) {
   # Function only runs once initially, when Observe() calls it below
   fetch_data <- reactive({
     runjs('document.getElementById("loading-overlay").style.display = "flex";')
-    runjs('document.getElementById("loading-message").textContent = "Fetching data from server, please wait...";')
+    runjs('document.getElementById("loading-message").textContent = "Fetching latest database from server, please wait...";')
     
     server_grab <- FALSE
     database_file <- NULL
@@ -115,7 +121,7 @@ server <- function(input, output, session) {
       server_con <- dbConnect(
         odbc::odbc(),
         Driver   = "SQL Server",
-        Server = Sys.getenv("SQL_SERVER"), #Testing, fix this 
+        Server = Sys.getenv("SQL_SERVER"), 
         Database = Sys.getenv("SQL_DATABASE"),
         Trusted_Connection = "Yes")
       
@@ -157,6 +163,9 @@ server <- function(input, output, session) {
       
       # Get the data range for backup data:
       date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
+      
+      # Rename StationID to SamplingPoint to reduce errors:
+      dbExecute(conn_sqlite, "ALTER TABLE WebLIMSResults RENAME COLUMN StationID to SamplingPoint")
       
       # FIX the leading/trailing spaces for SQLITE here:
       # Run update queries to trim spaces
