@@ -20,7 +20,7 @@ readRenviron(".Renviron")
 # pull the data. IF this connection fails, will default to smaller backup database.
 
 # Define constants
-fallback_data_path <- "Data/WebLIMS_backup.duckdb" # Update this with better database
+fallback_data_path <- "WebLIMS_backup.duckdb" # Update this with better database
 temp_dir <- tempdir()
 
 # Define UI
@@ -165,7 +165,11 @@ server <- function(input, output, session) {
       date_range <- dbGetQuery(conn_sqlite, "SELECT MIN(DateSampled) AS min_date, MAX(DateSampled) AS max_date FROM WebLIMSResults")
       
       # Rename StationID to SamplingPoint to reduce errors:
-      dbExecute(conn_sqlite, "ALTER TABLE WebLIMSResults RENAME COLUMN StationID to SamplingPoint")
+      # cols <- dbListFields(conn_sqlite, "WebLIMSResults")
+      # if ("StationID" %in% cols) {
+      #   dbExecute(conn_sqlite, "ALTER TABLE WebLIMSResults RENAME COLUMN StationID TO SamplingPoint")
+      # }
+      
       
       # FIX the leading/trailing spaces for SQLITE here:
       # Run update queries to trim spaces
