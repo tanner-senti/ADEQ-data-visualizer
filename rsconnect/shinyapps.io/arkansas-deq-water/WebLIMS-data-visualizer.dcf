@@ -1,0 +1,12 @@
+name: WebLIMS-data-visualizer
+title: WebLIMS-data-visualizer
+username: arkansas-deq-water
+account: arkansas-deq-water
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 15018993
+bundleId: 10549615
+url: https://arkansas-deq-water.shinyapps.io/WebLIMS-data-visualizer/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
