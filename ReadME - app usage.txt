@@ -5,12 +5,14 @@ App Usage:
 Simply make sure all packages are installed, then click "Run App"
 in the top-right corner of RStudio.
 
-The standard app will connect to the WebLIMS SQL Server database and interactively
-plot selected parameters.
+The current version of the app will check the WebLIMS SQL server for new data,
+cache it to a local database, then interactively plot selected sites and parameters.
 
 This method will work if the app is:
 	- Run locally on a laptop connected to DEQ IT's servers (all employee laptops)
 	- If the app is hosted by DEQ to a webpage in the future
+
+-------------------
 
 There is a backup script "app-backup-access.R" that functions the exact same,
 except this version will download the entire WebLIMS database Access file that is

@@ -11,7 +11,8 @@ packages <- c(
   "shinyjs",
   "bslib",
   "stringr",
-  "later"
+  "later",
+  "ggimage"
 )
 
 for (pkg in packages) {
@@ -33,6 +34,7 @@ library(shinyjs)
 library(bslib)
 library(stringr)
 library(later)
+library(ggimage)
 
 #---------------------------------------------------------
 # Load connection info and constants
@@ -159,7 +161,7 @@ ui <- fluidPage(
             style = "text-align:center; margin-top:15px;",
             actionButton(
               "update_data4",
-              "Display Data",
+              "Expecto Patronum",
               style = "font-size:16px; padding:10px 30px; background-color:#0080b7; color:white; border:none; border-radius:8px;",
               icon = icon("sync")
             )
@@ -908,6 +910,17 @@ server <- function(input, output, session) {
     y_buffer <- diff(y_range) * 0.15 # Add 15% buffer
     y_range <- c(y_range[1] - y_buffer, y_range[2] + y_buffer)
 
+    ## Map legend_shape to image paths
+    selected_plot_dat <- selected_plot_dat %>%
+      mutate(
+        point_image = case_when(
+          legend_shape == "Measured value" ~ "www/measured.png",
+          legend_shape == "<DL" ~ "www/below_dl.png",
+          legend_shape == ">DL" ~ "www/above_dl.png",
+          legend_shape == "Qualifier" ~ "www/above_dl.png"
+        )
+      )
+
     # Base aesthetics
     base_aes <- aes(
       x = DateSampled,
@@ -926,37 +939,35 @@ server <- function(input, output, session) {
         "<br>Depth: ",
         RelativeDepthComments
       ),
-      shape = legend_shape,
-      data_id = .point_id # Can use this for interacive effects
+      data_id = .point_id
     )
 
     # Color aesthetic only affects legend, actual grouping by SiteParam
     p <- ggplot(selected_plot_dat, base_aes) +
       {
         if (use_size) {
-          geom_point_interactive(
+          geom_image(
             aes(
-              size = RelativeDepthComments,
-              color = .data[[color_var]],
+              image = point_image,
+              size = RelativeDepthSample,
               group = SiteParam
-            ),
-            alpha = 0.7
+            )
           )
         } else {
-          geom_point_interactive(
-            aes(color = .data[[color_var]], group = SiteParam),
-            alpha = 0.7,
-            size = 2.5
+          geom_image(
+            aes(
+              image = point_image,
+              group = SiteParam
+            ),
+            size = 0.05
           )
         }
       } +
-      scale_shape_manual(
-        values = c(
-          "Measured value" = 16,
-          "<DL" = 25,
-          ">DL" = 24,
-          "Qualifier" = 5
-        )
+      # Add invisible points for color legend only
+      geom_point(
+        aes(color = .data[[color_var]]),
+        alpha = 0, # completely transparent
+        size = 0
       ) +
       {
         if (use_size) {
@@ -1149,7 +1160,7 @@ server <- function(input, output, session) {
             data_id = SiteParam
           ),
           linetype = "dashed",
-          size = 0.8,
+          size = 0.8
         )
     }
 
